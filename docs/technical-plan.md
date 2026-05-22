@@ -8,6 +8,7 @@ MVP 采用轻量本地架构：
 
 ```text
 Excel/CSV 输入
+  -> 原始文件归档
   -> Python 导入与清洗
   -> SQLite 核心表
   -> 关系候选聚合服务
@@ -29,9 +30,9 @@ Excel/CSV 输入
 
 | 模块 | 路径 | 职责 |
 | --- | --- | --- |
-| 配置 | `src/trade_entity_graph/config.py` | 读取本地环境、数据库路径、规则版本、字段映射版本 |
+| 配置 | `src/trade_entity_graph/config.py` | 读取本地环境、数据库路径、导入归档根目录、规则版本、字段映射版本 |
 | 数据库 | `src/trade_entity_graph/db/` | SQLite 连接、schema、迁移脚本和初始化 |
-| 导入 | `src/trade_entity_graph/importers/` | Excel/CSV 读取、字段映射、企业加载、订单证据加载、候选导入 |
+| 导入 | `src/trade_entity_graph/importers/` | Excel/CSV 读取、原始文件归档、字段映射、企业加载、订单证据加载、候选导入 |
 | 服务 | `src/trade_entity_graph/services/` | 企业搜索、关系聚合、图查询、审核写回、导出 |
 | API | `src/trade_entity_graph/api/` | FastAPI app 和 REST routers |
 | UI | `src/trade_entity_graph/ui/` | Streamlit MVP 页面 |
@@ -54,6 +55,10 @@ Python 环境约定：
 `import_batch` 保存每次导入的上下文，用 `run_id` 串联订单证据、企业别名和关系候选。
 
 关键字段：`run_id`、`source_file`、`source_path`、`imported_by`、`field_mapping_version`、`rule_version`、`success_rows`、`error_rows`、`error_summary`。
+
+`import_source_file` 保存每次导入的逐文件归档记录。导入流程会把源 Excel/CSV 复制到 `data/raw/imports/<run_id>/`，原文件不移动。
+
+关键字段：`source_file_id`、`run_id`、`source_role`、`original_path`、`archived_path`、`file_name`、`file_size_bytes`、`sha256`、`archived_at`。
 
 ### 3.2 企业主体与别名
 
@@ -120,6 +125,7 @@ P0 字段能力：
 | `/relationships/{relationship_id}/decision` | POST | 支持确认、否定、修改关系 |
 | `/relationships/manual` | POST | 支持人工新增关系 |
 | `/exports/relationships` | POST | 导出关系明细 Excel/CSV |
+| `/imports/run` | POST | 触发导入、订单角色边生成和候选聚合，返回 `run_id`、统计信息和 `archived_files` |
 | `/paths?from=&to=` | GET | P1，返回两个企业之间的关系路径 |
 | `/imports` | GET | P1，查看导入批次 |
 
@@ -168,7 +174,7 @@ MVP 使用 Streamlit 快速实现，后续可迁移 React + AntV G6/Cytoscape.js
 
 | 页面/模块 | P0 功能 |
 | --- | --- |
-| 首页/导入页 | 上传或选择本地订单分析文件，展示字段预检查、成功行数、异常行数和 `run_id` |
+| 首页/导入页 | 输入本地订单/企业/关系文件路径，触发导入，展示成功行数、异常行数、`run_id` 和原始文件归档路径 |
 | 企业搜索页 | 输入关键词搜索标准名、原始名、清洗名和别名，点击企业进入详情或图谱 |
 | 企业详情页 | 展示主体信息、别名、订单统计、关系统计、最近证据和最近人工决策 |
 | 关系图谱页 | 展示中心企业一跳关系，按节点类型、边类型、关系状态编码，默认隐藏 `rejected` |
@@ -193,6 +199,7 @@ P0 测试优先覆盖闭环风险：
 
 - 数据库初始化：核心表和索引存在；
 - 企业导入：样例企业生成主体和别名；
+- 原始文件归档：导入时生成 `import_source_file`，归档路径存在，SHA256 长度正确，测试归档根目录隔离在 `tmp_path`；
 - 订单证据导入：样例订单写入 `order_evidence`；
 - 订单角色边：客户 -> 通知人等核心边正确生成；
 - 候选聚合：多条订单边聚合为一条候选；
@@ -212,7 +219,26 @@ P0 测试优先覆盖闭环风险：
 8. 完成 M7 Streamlit 页面；
 9. 完成 M8 演示数据、导出和验收。
 
-## 9. 后续演进
+## 9. 当前开发记录
+
+截至 2026-05-22，`origin/main` 已完成 M2-M7 P0 闭环和导入源文件归档：
+
+- M2：导入企业、订单和已有关系候选，记录 `import_batch` 和 `import_source_file`。
+- M3/M4：生成 P0 订单角色边并聚合关系候选。
+- M5：提供实体、关系、图谱、审核和导出服务。
+- M6：提供 FastAPI P0 endpoint，`/imports/run` 返回 `archived_files`。
+- M7：提供中文 Streamlit 工作台，并在顶部展示基础逻辑与使用方法。
+
+最近一次验证：
+
+```powershell
+uv --cache-dir .uv-cache run pytest
+uv --cache-dir .uv-cache run ruff check .
+```
+
+结果：全量测试 14 passed，ruff 0 errors。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
+
+## 10. 后续演进
 
 - SQLite -> PostgreSQL：多人协作、权限和并发写入增强；
 - Streamlit -> React：稳定需求后产品化页面；

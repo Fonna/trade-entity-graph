@@ -1,6 +1,6 @@
 # Import Source File Archive Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. User preference for this session: do not commit.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking. Implementation note: initially developed locally; later committed and pushed after user requested repository publication.
 
 **Goal:** Archive every source file used by an import run and record per-file archive metadata for traceability.
 
@@ -17,7 +17,7 @@
 - Modify: `src/trade_entity_graph/importers/models.py`
 - Test: `tests/test_import_pipeline.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add assertions to an import pipeline test that expects:
 
@@ -39,17 +39,17 @@ assert all(row["sha256"] for row in archived_rows)
 assert all(Path(row["archived_path"]).exists() for row in archived_rows)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv --cache-dir .uv-cache run pytest tests\test_import_pipeline.py::test_run_import_loads_entities_orders_and_role_names -v`
 
 Expected: FAIL because `import_source_file` or `archived_files` does not exist.
 
-- [ ] **Step 3: Add schema and dataclasses**
+- [x] **Step 3: Add schema and dataclasses**
 
-Add `import_source_file` table to `schema.sql`, and add `ArchivedImportFile` plus `ImportRunResult.archived_files` to `models.py`.
+Add `import_source_file` table to `schema.sql`, and add `ImportRunResult.archived_files` to `models.py`.
 
-- [ ] **Step 4: Run test again**
+- [x] **Step 4: Run test again**
 
 Expected: test still fails until archive persistence is implemented.
 
@@ -60,15 +60,15 @@ Expected: test still fails until archive persistence is implemented.
 - Modify: `src/trade_entity_graph/importers/pipeline.py`
 - Test: `tests/test_import_pipeline.py`
 
-- [ ] **Step 1: Implement minimal archiver**
+- [x] **Step 1: Implement minimal archiver**
 
-Create a helper that accepts a run id and role/path pairs, copies files to `data/raw/imports/<run_id>/`, computes SHA256, records metadata, and returns `ArchivedImportFile` objects.
+Create a helper that accepts a run id and role/path pairs, copies files to `data/raw/imports/<run_id>/`, computes SHA256, records metadata, and returns archived-file metadata dictionaries.
 
-- [ ] **Step 2: Wire pipeline**
+- [x] **Step 2: Wire pipeline**
 
 Call the archiver immediately after `create_import_batch` and before reading source rows. Store returned items in `ImportRunResult.archived_files`.
 
-- [ ] **Step 3: Run focused tests**
+- [x] **Step 3: Run focused tests**
 
 Run: `uv --cache-dir .uv-cache run pytest tests\test_import_pipeline.py -v`
 
@@ -80,15 +80,15 @@ Expected: import pipeline tests pass.
 - Modify: `src/trade_entity_graph/ui/streamlit_app.py`
 - Modify: `tests/test_streamlit_app.py`
 
-- [ ] **Step 1: Show archive path in import UI**
+- [x] **Step 1: Show archive path in import UI**
 
 After import, show a short success note and dataframe/JSON entry with archived files so users can see where files were copied.
 
-- [ ] **Step 2: Update UI constants/test if needed**
+- [x] **Step 2: Update UI constants/test if needed**
 
 Keep the UI text Chinese and include the archive directory concept in the intro.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run:
 
@@ -98,3 +98,17 @@ uv --cache-dir .uv-cache run ruff check src\trade_entity_graph\importers src\tra
 ```
 
 Expected: tests and ruff pass.
+
+
+## Implementation Status
+
+Completed on 2026-05-22 and pushed to `origin/main` in commit `4dc6c27 feat: add import source archiving`.
+
+Validation evidence:
+
+```powershell
+uv --cache-dir .uv-cache run pytest
+uv --cache-dir .uv-cache run ruff check .
+```
+
+Result: full test suite 14 passed; ruff reported no errors. Streamlit AppTest also passed for the Chinese UI guide and archive-path text.

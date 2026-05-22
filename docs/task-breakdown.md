@@ -41,6 +41,7 @@ MVP 第一版只承诺 P0 闭环：
 | DB-08 | 创建 `import_batch` 表 | P0 | `schema.sql` | 每次导入有唯一 `run_id` 并记录源文件和规则版本 |
 | DB-09 | 创建 `audit_log` 表 | P0 | `schema.sql` | 关键人工操作可追溯 |
 | DB-10 | 添加常用索引 | P0 | `schema.sql` | 支持企业搜索、边查询、关系详情查询 |
+| DB-11 | 创建 `import_source_file` 表 | P0 | `schema.sql` | 每个导入源文件可记录角色、原始路径、归档路径、文件大小和 SHA256 |
 
 ## 4. 数据导入任务
 
@@ -52,6 +53,7 @@ MVP 第一版只承诺 P0 闭环：
 | IMP-04 | 生成导入批次 `run_id` | P0 | 可按 `run_id` 查询导入结果 |
 | IMP-05 | 字段映射配置 | P1 | 字段名变化时不改代码即可适配 |
 | IMP-06 | 异常行记录 | P1 | 字段缺失、企业无法匹配、TEU 异常可导出复核 |
+| IMP-07 | 原始文件归档 | P0 | 导入时复制源文件到 `data/raw/imports/<run_id>/`，原文件不移动，并写入 `import_source_file` |
 
 ## 5. 订单角色边任务
 
@@ -107,14 +109,15 @@ MVP 第一版只承诺 P0 闭环：
 | API-08 | `/relationships/{relationship_id}/decision` | POST | P0 | 支持确认、否定、修改关系 |
 | API-09 | `/relationships/manual` | POST | P0 | 支持人工新增关系 |
 | API-10 | `/exports/relationships` | POST | P0 | 导出关系明细 Excel/CSV |
-| API-11 | `/paths?from=&to=` | GET | P1 | 返回 A 到 C 的关系路径 |
-| API-12 | `/imports` | GET | P1 | 查看导入批次 |
+| API-11 | `/imports/run` | POST | P0 | 触发导入、边生成和候选聚合，并返回 `archived_files` |
+| API-12 | `/paths?from=&to=` | GET | P1 | 返回 A 到 C 的关系路径 |
+| API-13 | `/imports` | GET | P1 | 查看导入批次 |
 
 ## 9. 前端页面任务
 
 | ID | 页面/模块 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
-| UI-01 | 首页/导入页 | P0 | 可选择文件、触发导入、查看成功/异常数量 |
+| UI-01 | 首页/导入页 | P0 | 可输入本地文件路径、触发导入、查看成功/异常数量、批次号和原始文件归档路径 |
 | UI-02 | 企业搜索页 | P0 | 输入企业名后展示匹配主体 |
 | UI-03 | 企业详情页 | P0 | 展示主体信息、别名、订单统计和关系统计 |
 | UI-04 | 关系图谱页 | P0 | 展示中心企业一跳图谱 |
@@ -143,14 +146,14 @@ MVP 第一版只承诺 P0 闭环：
 
 ## 11. 当前实现状态
 
-截至 2026-05-22，仓库已完成 M2-M7 P0 的服务层优先实现：
+截至 2026-05-22，仓库已完成 M2-M7 P0 的服务层优先实现，并已推送到 `origin/main`：
 
-- M2：支持 Excel/CSV 导入，生成 `import_batch`、`entity`、`entity_alias`、`order_evidence`，并可导入已有 `relationship_claim`。
+- M2：支持 Excel/CSV 导入，生成 `import_batch`、`import_source_file`、`entity`、`entity_alias`、`order_evidence`，并可导入已有 `relationship_claim`；导入时会复制原始文件到 `data/raw/imports/<run_id>/`。
 - M3：支持生成 `customer_to_shipper`、`customer_to_consignee`、`customer_to_notify`、`shipper_to_consignee` 四类 P0 订单角色边。
 - M4：支持从订单角色边聚合候选关系，生成订单数、TEU、角色组合、目的国、产品摘要、置信度和推荐理由。
 - M5：支持实体搜索、实体详情、一跳图谱、关系详情、关系证据、审核写回和导出服务。
-- M6：支持 P0 FastAPI endpoint，包括导入、搜索、详情、图谱、关系详情、审核和导出。
-- M7：支持 Streamlit MVP 工作台 tabs：Import、Search、Graph、Relationship Detail、Review、Export。
+- M6：支持 P0 FastAPI endpoint，包括导入、搜索、详情、图谱、关系详情、审核和导出；`/imports/run` 返回本次导入的 `archived_files`。
+- M7：支持中文 Streamlit MVP 工作台 tabs：数据导入、企业搜索、关系图谱、关系详情、人工审核、导出；顶部包含基础逻辑与使用方法说明。
 
 验证命令：
 
@@ -159,4 +162,4 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-当前通过标准：全量测试 11 passed，ruff 0 errors。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
+当前通过标准：全量测试 14 passed，ruff 0 errors。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。

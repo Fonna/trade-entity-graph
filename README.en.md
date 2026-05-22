@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## Quick Start
 
-The repository has completed the M0/M1 baseline and now includes the M2-M7 P0 demo loop: Excel/CSV import, order-role edge generation, relationship candidate aggregation, one-hop graph query, FastAPI endpoints, Streamlit workbench, and export support.
+The repository has completed the M0/M1 baseline and now includes the M2-M7 P0 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop graph query, FastAPI endpoints, Chinese Streamlit workbench, and export support.
 
 All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
 
@@ -91,11 +91,14 @@ Run smoke tests:
 uv run pytest
 ```
 
+During import, the system copies original Excel/CSV files to `data/raw/imports/<run_id>/` and records each file role, original path, archived path, file size, and SHA256 in the SQLite `import_source_file` table.
+
 ## Data Flow
 
 ```mermaid
 flowchart TD
   A[Import order details and existing analysis outputs]
+  A0[Archive source files to data/raw/imports/run_id]
   B[Clean names and match entities]
   C[Generate order-role edges]
   D[Aggregate relationship candidates]
@@ -105,7 +108,8 @@ flowchart TD
   H[Search and graph visualization]
   I[Export/BI/opportunity list]
 
-  A --> B
+  A --> A0
+  A0 --> B
   B --> C
   C --> D
   D --> E
@@ -126,6 +130,7 @@ flowchart TD
 - `curated_relationship`: Final confirmed, rejected, pending, or manually created relationships.
 - `relationship_decision`: Human review actions with before/after state, reason, operator, and timestamp.
 - `import_batch`: Import metadata, including source files, mapping version, rule version, success count, and error count.
+- `import_source_file`: Per-source archive metadata, including file role, original path, archived path, file size, and SHA256.
 - `audit_log`: Audit trail for key operations.
 
 ## Key Documents
@@ -134,6 +139,18 @@ flowchart TD
 - `MVP研发任务拆解.md`: Original MVP task breakdown.
 - `docs/task-breakdown.md`: Organized development task list.
 - `docs/technical-plan.md`: MVP technical plan, data model, APIs, and UI breakdown.
+- `docs/superpowers/plans/2026-05-22-import-source-file-archive.md`: Source-file archive implementation plan and execution record.
+
+## Current Development Status
+
+As of 2026-05-22, `origin/main` includes the M2-M7 P0 loop and source-file archiving. Latest verification:
+
+```powershell
+uv --cache-dir .uv-cache run pytest
+uv --cache-dir .uv-cache run ruff check .
+```
+
+Result: `14 passed`, ruff `All checks passed!`. A `.pytest_cache` write-permission warning may appear in the current desktop sandbox and does not affect the test result.
 
 ## Recommended Development Order
 

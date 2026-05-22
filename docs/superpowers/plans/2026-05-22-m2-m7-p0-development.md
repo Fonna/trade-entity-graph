@@ -185,3 +185,25 @@ Expected: all tests pass and ruff reports `All checks passed!`.
 - Placeholder scan: no unfilled placeholder markers remain.
 - Type consistency: importers return dataclasses or dictionaries; services return plain dictionaries/lists; API returns those values as JSON.
 - Scope check: P1 features remain excluded.
+
+
+## Implementation Status
+
+Completed and pushed on 2026-05-22.
+
+Related commits:
+
+- `59800a7 docs: design m2 m7 p0 loop`
+- `b942f44 docs: plan m2 m7 p0 implementation`
+- `b29a10d feat: implement m2 m7 p0 loop`
+- `4dc6c27 feat: add import source archiving`
+
+Current P0 status:
+
+- M2 import foundation is implemented with entity, alias, order evidence, optional relationship candidate import, and source-file archive metadata.
+- M3/M4 order-role edge generation and relationship candidate aggregation are implemented.
+- M5 service-layer entity, graph, relationship, review, and export flows are implemented.
+- M6 FastAPI P0 endpoints are implemented and tested.
+- M7 Streamlit workbench is localized in Chinese and includes a basic logic/use guide.
+
+Latest verification: full test suite 14 passed; ruff reported no errors.

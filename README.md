@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## 快速开始
 
-当前仓库已完成 M0/M1 基线，并具备 M2-M7 P0 可演示闭环：Excel/CSV 导入、订单角色边生成、候选关系聚合、一跳图谱查询、FastAPI 接口、Streamlit 工作台和导出能力。
+当前仓库已完成 M0/M1 基线，并具备 M2-M7 P0 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳图谱查询、FastAPI 接口、中文 Streamlit 工作台和导出能力。
 
 本项目所有 Python 环境、依赖安装和命令运行统一使用 `uv`，避免污染全局 Python 环境。
 
@@ -91,11 +91,14 @@ uv run python scripts\run_ui.py
 uv run pytest
 ```
 
+导入时，系统会复制原始 Excel/CSV 文件到 `data/raw/imports/<run_id>/`，并在 SQLite 表 `import_source_file` 中记录文件角色、原始路径、归档路径、文件大小和 SHA256。
+
 ## 数据流
 
 ```mermaid
 flowchart TD
   A[导入订单明细与已有分析结果]
+  A0[原始文件归档到 data/raw/imports/run_id]
   B[企业名称清洗与主体匹配]
   C[生成订单角色关系]
   D[聚合关系候选]
@@ -105,7 +108,8 @@ flowchart TD
   H[关系图谱搜索与可视化]
   I[导出/BI/机会清单]
 
-  A --> B
+  A --> A0
+  A0 --> B
   B --> C
   C --> D
   D --> E
@@ -126,6 +130,7 @@ flowchart TD
 - `curated_relationship`：人工确认、否定、待验证或人工新增的最终关系。
 - `relationship_decision`：人工审核记录，保存动作前后状态、理由、操作人和时间。
 - `import_batch`：导入批次，保存源文件、字段映射版本、规则版本、成功/异常行数。
+- `import_source_file`：导入源文件归档记录，保存文件角色、原始路径、归档路径、文件大小和 SHA256。
 - `audit_log`：关键操作审计日志。
 
 ## 关键文档
@@ -134,6 +139,18 @@ flowchart TD
 - `MVP研发任务拆解.md`：MVP 研发任务原始拆解。
 - `docs/task-breakdown.md`：整理后的研发任务清单。
 - `docs/technical-plan.md`：MVP 技术方案、数据模型、API 和前端页面拆解。
+- `docs/superpowers/plans/2026-05-22-import-source-file-archive.md`：原始文件归档实现计划与执行记录。
+
+## 当前开发状态
+
+截至 2026-05-22，`origin/main` 已包含 M2-M7 P0 闭环和原始文件归档能力。最近一次验证：
+
+```powershell
+uv --cache-dir .uv-cache run pytest
+uv --cache-dir .uv-cache run ruff check .
+```
+
+验证结果：`14 passed`，ruff `All checks passed!`。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
 
 ## 推荐开发顺序
 

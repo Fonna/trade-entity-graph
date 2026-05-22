@@ -1306,3 +1306,10 @@ uv --cache-dir .uv-cache run ruff check .
 ```
 
 Completion requires both commands to exit with code 0.
+
+
+## Current Status
+
+M2 was completed as part of the broader M2-M7 P0 implementation and later extended with source-file archiving.
+
+Current import outputs include `import_batch`, `import_source_file`, `entity`, `entity_alias`, `order_evidence`, and optional `relationship_claim` rows. Latest full-suite verification on 2026-05-22 reported 14 passed and ruff 0 errors.
