@@ -1,0 +1,4 @@
+"""Relationship candidate and curated relationship operations.
+
+Implementation starts after the M1/M2 data foundation is complete.
+"""
