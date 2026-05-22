@@ -37,3 +37,4 @@ class ImportRunResult:
     evidence_count: int = 0
     claim_count: int = 0
     skipped_rows: list[str] = field(default_factory=list)
+    archived_files: list[dict[str, str | int]] = field(default_factory=list)

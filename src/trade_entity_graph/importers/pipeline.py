@@ -12,6 +12,7 @@ from trade_entity_graph.importers.evidence_loader import load_order_evidence
 from trade_entity_graph.importers.excel_importer import read_tabular_rows
 from trade_entity_graph.importers.models import ImportInputs, ImportRunResult
 from trade_entity_graph.importers.relationship_loader import load_relationship_claims
+from trade_entity_graph.importers.source_archive import archive_source_files
 
 
 def _primary_source(inputs: ImportInputs) -> Path:
@@ -19,6 +20,17 @@ def _primary_source(inputs: ImportInputs) -> Path:
         if path is not None:
             return Path(path)
     raise ValueError("At least one import input path is required")
+
+
+def _input_sources(inputs: ImportInputs) -> list[tuple[str, Path]]:
+    sources: list[tuple[str, Path]] = []
+    if inputs.entities_path is not None:
+        sources.append(("entities", Path(inputs.entities_path)))
+    if inputs.orders_path is not None:
+        sources.append(("orders", Path(inputs.orders_path)))
+    if inputs.relationships_path is not None:
+        sources.append(("relationships", Path(inputs.relationships_path)))
+    return sources
 
 
 def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> ImportRunResult:
@@ -38,6 +50,11 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             rule_version=settings.rule_version,
         )
         result = ImportRunResult(run_id=run_id)
+        result.archived_files = archive_source_files(
+            connection,
+            run_id=run_id,
+            sources=_input_sources(inputs),
+        )
 
         if inputs.entities_path is not None:
             entity_result = load_entities(

@@ -52,4 +52,5 @@ def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
         "edge_count": edge_count,
         "claim_count": claim_count,
         "skipped_rows": result.skipped_rows,
+        "archived_files": result.archived_files,
     }

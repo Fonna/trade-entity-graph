@@ -54,7 +54,9 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
     db_path = tmp_path / "api.db"
     entities_path = tmp_path / "entities.csv"
     orders_path = tmp_path / "orders.csv"
+    archive_root = tmp_path / "archives"
     monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(archive_root))
 
     pd.DataFrame(
         {
@@ -93,6 +95,11 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
     assert status == 200
     assert import_payload["edge_count"] == 7
     assert import_payload["claim_count"] == 3
+    assert len(import_payload["archived_files"]) == 2
+    assert {item["source_role"] for item in import_payload["archived_files"]} == {
+        "entities",
+        "orders",
+    }
 
     status, search_payload = _request(app, "GET", "/entities/search", query={"q": "acme"})
     assert status == 200

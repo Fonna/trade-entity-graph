@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 
 from trade_entity_graph.db.connection import get_connection
@@ -5,10 +7,12 @@ from trade_entity_graph.importers.models import ImportInputs
 from trade_entity_graph.importers.pipeline import run_import
 
 
-def test_run_import_loads_entities_orders_and_role_names(tmp_path) -> None:
+def test_run_import_loads_entities_orders_and_role_names(tmp_path, monkeypatch) -> None:
     entities_path = tmp_path / "entities.csv"
     orders_path = tmp_path / "orders.csv"
     db_path = tmp_path / "trade_entity_graph.db"
+    archive_root = tmp_path / "archives"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(archive_root))
 
     pd.DataFrame(
         {
@@ -47,6 +51,15 @@ def test_run_import_loads_entities_orders_and_role_names(tmp_path) -> None:
             ORDER BY order_id
             """
         ).fetchall()
+        archived_rows = connection.execute(
+            """
+            SELECT source_role, original_path, archived_path, file_name, file_size_bytes, sha256
+            FROM import_source_file
+            WHERE run_id = ?
+            ORDER BY source_role
+            """,
+            (result.run_id,),
+        ).fetchall()
 
     assert result.run_id.startswith("RUN_")
     assert result.entity_count == 3
@@ -61,3 +74,43 @@ def test_run_import_loads_entities_orders_and_role_names(tmp_path) -> None:
     assert evidence_rows[0]["consignee_name"] == "Omega Buyer LLC"
     assert evidence_rows[1]["notify_name"] == "SAME AS"
     assert evidence_rows[0]["teu"] == 3.5
+    assert len(result.archived_files) == 2
+    assert {row["source_role"] for row in archived_rows} == {"entities", "orders"}
+    assert {Path(row["original_path"]) for row in archived_rows} == {entities_path, orders_path}
+    assert all(Path(row["archived_path"]).exists() for row in archived_rows)
+    assert all(archive_root in Path(row["archived_path"]).parents for row in archived_rows)
+    assert all(Path(row["archived_path"]).parent.name == result.run_id for row in archived_rows)
+    assert all(row["file_size_bytes"] > 0 for row in archived_rows)
+    assert all(len(row["sha256"]) == 64 for row in archived_rows)
+    assert {item["source_role"] for item in result.archived_files} == {"entities", "orders"}
+
+
+def test_run_import_allows_entities_without_country_or_entity_type(tmp_path, monkeypatch) -> None:
+    entities_path = tmp_path / "entities.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "标准名": ["ACME TRADING"],
+            "原始名": ["Acme Trading Ltd"],
+            "清洗名": ["ACME TRADING LTD"],
+        }
+    ).to_csv(entities_path, index=False)
+
+    result = run_import(
+        ImportInputs(entities_path=entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        row = connection.execute(
+            "SELECT canonical_name, country, entity_type FROM entity"
+        ).fetchone()
+
+    assert result.entity_count == 1
+    assert result.alias_count == 2
+    assert result.skipped_rows == []
+    assert row["canonical_name"] == "ACME TRADING"
+    assert row["country"] is None
+    assert row["entity_type"] is None

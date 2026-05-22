@@ -14,6 +14,18 @@ CREATE TABLE IF NOT EXISTS import_batch (
     error_summary TEXT
 );
 
+CREATE TABLE IF NOT EXISTS import_source_file (
+    source_file_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES import_batch(run_id),
+    source_role TEXT NOT NULL,
+    original_path TEXT NOT NULL,
+    archived_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_size_bytes INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    archived_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS entity (
     entity_id TEXT PRIMARY KEY,
     canonical_name TEXT NOT NULL,
@@ -150,6 +162,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_entity_canonical_name ON entity(canonical_name);
 CREATE INDEX IF NOT EXISTS idx_entity_alias_name ON entity_alias(alias_name);
+CREATE INDEX IF NOT EXISTS idx_import_source_file_run ON import_source_file(run_id);
 CREATE INDEX IF NOT EXISTS idx_order_role_edge_from ON order_role_edge(from_entity_id);
 CREATE INDEX IF NOT EXISTS idx_order_role_edge_to ON order_role_edge(to_entity_id);
 CREATE INDEX IF NOT EXISTS idx_order_role_edge_role_pair ON order_role_edge(role_pair_type);
