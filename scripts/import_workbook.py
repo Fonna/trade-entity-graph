@@ -12,7 +12,9 @@ from trade_entity_graph.importers.excel_importer import inspect_workbook
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Inspect an Excel/CSV workbook for import readiness.")
+    parser = argparse.ArgumentParser(
+        description="Inspect an Excel/CSV workbook for import readiness."
+    )
     parser.add_argument("path", help="Path to the source workbook")
     args = parser.parse_args()
     print(inspect_workbook(args.path))

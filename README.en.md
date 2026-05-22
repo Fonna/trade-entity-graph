@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## Quick Start
 
-The repository is currently at the M0 scaffold stage. Data import, relationship generation, review writes, and graph UI will be implemented in later iterations.
+The repository has completed the M0 scaffold and M1 database initialization foundation: core schema, initialization script, smoke tests, schema initialization tests, and lint baseline are in place. The next phase focuses on the M2 data import loop.
 
 All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
 
