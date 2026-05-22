@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## Quick Start
 
-The repository has completed the M0 scaffold and M1 database initialization foundation: core schema, initialization script, smoke tests, schema initialization tests, and lint baseline are in place. The next phase focuses on the M2 data import loop.
+The repository has completed the M0/M1 baseline and now includes the M2-M7 P0 demo loop: Excel/CSV import, order-role edge generation, relationship candidate aggregation, one-hop graph query, FastAPI endpoints, Streamlit workbench, and export support.
 
 All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
 

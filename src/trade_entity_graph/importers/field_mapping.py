@@ -1,0 +1,50 @@
+"""Field alias helpers for import sources."""
+
+from __future__ import annotations
+
+from typing import Any
+
+FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "canonical_name": ("canonical_name", "standard_name", "标准名", "企业标准名"),
+    "original_name": ("original_name", "raw_name", "原始名", "原始企业名"),
+    "clean_name": ("clean_name", "cleaned_name", "清洗名", "清洗后名称"),
+    "alias_name": ("alias_name", "alias", "别名", "企业别名"),
+    "country": ("country", "国家", "国家地区"),
+    "entity_type": ("entity_type", "主体类型", "企业类型"),
+    "order_id": ("order_id", "订单号", "业务编号", "so_no"),
+    "customer_name": ("customer_name", "客户名称", "下单客户", "customer"),
+    "shipper_name": ("shipper_name", "发货人", "shipper"),
+    "consignee_name": ("consignee_name", "收货人", "consignee"),
+    "notify_name": ("notify_name", "通知人", "notify"),
+    "teu": ("teu", "TEU", "箱量TEU"),
+    "product_name": ("product_name", "产品名称", "货品名称"),
+    "function_category": ("function_category", "功能分类", "产品功能"),
+    "destination_country": ("destination_country", "目的国", "目的国家"),
+    "destination_port": ("destination_port", "目的港", "目的港口"),
+    "order_date": ("order_date", "订单日期", "出运日期"),
+    "from_entity_id": ("from_entity_id", "source_entity_id", "起点主体ID"),
+    "to_entity_id": ("to_entity_id", "target_entity_id", "终点主体ID"),
+    "candidate_relation_type": ("candidate_relation_type", "关系类型", "候选关系类型"),
+    "confidence_level": ("confidence_level", "置信度等级", "置信等级"),
+    "confidence_score": ("confidence_score", "置信度分数", "score"),
+    "order_count": ("order_count", "订单数"),
+    "total_teu": ("total_teu", "总TEU", "teu_total"),
+    "recommendation_reason": ("recommendation_reason", "推荐理由", "reason"),
+}
+
+
+def normalize_key(value: str) -> str:
+    """Normalize a source column name for alias matching."""
+
+    return "".join(ch for ch in value.strip().lower() if ch not in {" ", "_", "-"})
+
+
+def get_value(row: dict[str, Any], field_name: str, default: Any = None) -> Any:
+    """Return a logical field value from a source row."""
+
+    normalized_row = {normalize_key(key): value for key, value in row.items()}
+    for alias in FIELD_ALIASES[field_name]:
+        normalized_alias = normalize_key(alias)
+        if normalized_alias in normalized_row:
+            return normalized_row[normalized_alias]
+    return default

@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## 快速开始
 
-当前仓库已完成 M0 项目脚手架与 M1 数据库初始化基础：核心 schema、初始化脚本、smoke test、schema 初始化测试和 lint 基线均已具备。下一阶段聚焦 M2 数据导入闭环。
+当前仓库已完成 M0/M1 基线，并具备 M2-M7 P0 可演示闭环：Excel/CSV 导入、订单角色边生成、候选关系聚合、一跳图谱查询、FastAPI 接口、Streamlit 工作台和导出能力。
 
 本项目所有 Python 环境、依赖安装和命令运行统一使用 `uv`，避免污染全局 Python 环境。
 

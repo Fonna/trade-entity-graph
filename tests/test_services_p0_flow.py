@@ -1,0 +1,143 @@
+import pandas as pd
+
+from trade_entity_graph.db.connection import get_connection
+from trade_entity_graph.importers.models import ImportInputs
+from trade_entity_graph.importers.pipeline import run_import
+from trade_entity_graph.services.entity_service import get_entity_detail, search_entities
+from trade_entity_graph.services.export_service import export_relationship_rows
+from trade_entity_graph.services.graph_service import get_ego_graph
+from trade_entity_graph.services.relationship_service import (
+    aggregate_relationship_claims,
+    generate_order_role_edges,
+)
+from trade_entity_graph.services.review_service import (
+    create_manual_relationship,
+    decide_relationship,
+)
+
+
+def _seed_p0_flow(tmp_path):
+    entities_path = tmp_path / "entities.csv"
+    orders_path = tmp_path / "orders.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+
+    pd.DataFrame(
+        {
+            "标准名": ["ACME TRADING", "BETA FACTORY", "OMEGA BUYER"],
+            "原始名": ["Acme Trading Ltd", "Beta Factory Inc", "Omega Buyer LLC"],
+            "清洗名": ["ACME TRADING LTD", "BETA FACTORY INC", "OMEGA BUYER LLC"],
+            "主体类型": ["customer", "factory", "buyer"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(
+        {
+            "订单号": ["SO-1", "SO-2"],
+            "下单客户": ["Acme Trading Ltd", "Acme Trading Ltd"],
+            "发货人": ["Beta Factory Inc", "Beta Factory Inc"],
+            "收货人": ["Omega Buyer LLC", "Omega Buyer LLC"],
+            "通知人": ["Omega Buyer LLC", "SAME AS"],
+            "TEU": [3.5, 4.0],
+            "产品名称": ["Widget", "Widget"],
+            "目的国": ["MX", "MX"],
+        }
+    ).to_csv(orders_path, index=False)
+    result = run_import(
+        ImportInputs(orders_path=orders_path, entities_path=entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+    generate_order_role_edges(db_path=db_path, run_id=result.run_id)
+    aggregate_relationship_claims(db_path=db_path, run_id=result.run_id)
+    return db_path
+
+
+def _entity_id(db_path, canonical_name: str) -> str:
+    with get_connection(db_path) as connection:
+        return connection.execute(
+            "SELECT entity_id FROM entity WHERE canonical_name = ?",
+            (canonical_name,),
+        ).fetchone()["entity_id"]
+
+
+def _claim_id(db_path, source: str, target: str) -> str:
+    with get_connection(db_path) as connection:
+        return connection.execute(
+            """
+            SELECT claim_id
+            FROM relationship_claim rc
+            JOIN entity e1 ON e1.entity_id = rc.from_entity_id
+            JOIN entity e2 ON e2.entity_id = rc.to_entity_id
+            WHERE e1.canonical_name = ? AND e2.canonical_name = ?
+            """,
+            (source, target),
+        ).fetchone()["claim_id"]
+
+
+def test_entity_search_detail_graph_review_and_export_p0_flow(tmp_path) -> None:
+    db_path = _seed_p0_flow(tmp_path)
+    acme_id = _entity_id(db_path, "ACME TRADING")
+    beta_id = _entity_id(db_path, "BETA FACTORY")
+    omega_id = _entity_id(db_path, "OMEGA BUYER")
+
+    matches = search_entities("acme", db_path=db_path)
+    detail = get_entity_detail(acme_id, db_path=db_path)
+
+    assert matches[0]["entity_id"] == acme_id
+    assert detail["canonical_name"] == "ACME TRADING"
+    assert detail["alias_count"] == 2
+    assert detail["order_edge_count"] == 5
+
+    confirmed = decide_relationship(
+        _claim_id(db_path, "ACME TRADING", "BETA FACTORY"),
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Confirmed by sales",
+        operator="tester",
+        db_path=db_path,
+    )
+    rejected = decide_relationship(
+        _claim_id(db_path, "ACME TRADING", "OMEGA BUYER"),
+        action_type="reject",
+        relation_type="rejected_relation",
+        reason="Notify party is not related",
+        operator="tester",
+        db_path=db_path,
+    )
+    modified = decide_relationship(
+        _claim_id(db_path, "BETA FACTORY", "OMEGA BUYER"),
+        action_type="modify",
+        relation_type="factory_node",
+        reason="Factory supplies buyer",
+        operator="tester",
+        db_path=db_path,
+    )
+    manual = create_manual_relationship(
+        beta_id,
+        acme_id,
+        relation_type="sales_center",
+        reason="Manual business knowledge",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    assert confirmed["relation_status"] == "verified"
+    assert rejected["relation_status"] == "rejected"
+    assert modified["relation_type"] == "factory_node"
+    assert manual["source_type"] == "manual"
+
+    graph = get_ego_graph(acme_id, db_path=db_path)
+    exported = export_relationship_rows(acme_id, db_path=db_path)
+
+    assert {node["id"] for node in graph["nodes"]} == {acme_id, beta_id, omega_id}
+    assert any(edge["edge_type"] == "order_role_edge" for edge in graph["edges"])
+    assert any(edge["id"] == confirmed["relationship_id"] for edge in graph["edges"])
+    assert all(edge["status"] != "rejected" for edge in graph["edges"])
+    assert any(row["relationship_id"] == confirmed["relationship_id"] for row in exported)
+
+    with get_connection(db_path) as connection:
+        decision_count = connection.execute(
+            "SELECT COUNT(*) FROM relationship_decision"
+        ).fetchone()[0]
+        audit_count = connection.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+
+    assert decision_count == 4
+    assert audit_count == 4

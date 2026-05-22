@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from trade_entity_graph.api.routers import entities, exports, imports, relationships
 from trade_entity_graph.config import get_settings
 
 
@@ -16,6 +17,11 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "app": settings.app_name, "env": settings.app_env}
+
+    app.include_router(imports.router)
+    app.include_router(entities.router)
+    app.include_router(relationships.router)
+    app.include_router(exports.router)
 
     return app
 

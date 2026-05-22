@@ -140,3 +140,23 @@ MVP 第一版只承诺 P0 闭环：
 - [ ] 人工结果写入最终关系、决策记录和审计日志；
 - [ ] 已否定关系不会被物理删除或被系统自动覆盖；
 - [ ] 用户可以导出中心企业关系明细。
+
+## 11. 当前实现状态
+
+截至 2026-05-22，仓库已完成 M2-M7 P0 的服务层优先实现：
+
+- M2：支持 Excel/CSV 导入，生成 `import_batch`、`entity`、`entity_alias`、`order_evidence`，并可导入已有 `relationship_claim`。
+- M3：支持生成 `customer_to_shipper`、`customer_to_consignee`、`customer_to_notify`、`shipper_to_consignee` 四类 P0 订单角色边。
+- M4：支持从订单角色边聚合候选关系，生成订单数、TEU、角色组合、目的国、产品摘要、置信度和推荐理由。
+- M5：支持实体搜索、实体详情、一跳图谱、关系详情、关系证据、审核写回和导出服务。
+- M6：支持 P0 FastAPI endpoint，包括导入、搜索、详情、图谱、关系详情、审核和导出。
+- M7：支持 Streamlit MVP 工作台 tabs：Import、Search、Graph、Relationship Detail、Review、Export。
+
+验证命令：
+
+```powershell
+uv --cache-dir .uv-cache run pytest
+uv --cache-dir .uv-cache run ruff check .
+```
+
+当前通过标准：全量测试 11 passed，ruff 0 errors。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
