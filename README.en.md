@@ -70,24 +70,25 @@ trade-entity-graph/
 
 The repository is currently at the M0 scaffold stage. Data import, relationship generation, review writes, and graph UI will be implemented in later iterations.
 
+All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
+
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-python scripts\init_db.py
-python scripts\run_api.py
+uv python pin 3.12
+uv sync --extra dev
+uv run python scripts\init_db.py
+uv run python scripts\run_api.py
 ```
 
 Start the Streamlit prototype:
 
 ```powershell
-python scripts\run_ui.py
+uv run python scripts\run_ui.py
 ```
 
 Run smoke tests:
 
 ```powershell
-pytest
+uv run pytest
 ```
 
 ## Data Flow

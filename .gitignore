@@ -11,6 +11,7 @@ htmlcov/
 .venv/
 venv/
 env/
+.uv-cache/
 
 # Local env
 .env

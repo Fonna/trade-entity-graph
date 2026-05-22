@@ -39,6 +39,14 @@ Excel/CSV 输入
 | 脚本 | `scripts/` | 本地初始化、导入、启动 API、启动 UI |
 | 测试 | `tests/` | 数据库、导入、图查询、审核和导出测试 |
 
+Python 环境约定：
+
+- 使用 `uv sync --extra dev` 创建和同步项目虚拟环境；
+- 使用 `.python-version` 将项目 Python 版本固定为 3.12；
+- 使用 `uv run python ...` 启动脚本；
+- 使用 `uv run pytest` 运行测试；
+- 不使用全局 `pip install`、全局 `pytest` 或手工维护的共享虚拟环境。
+
 ## 3. 数据模型
 
 ### 3.1 导入批次

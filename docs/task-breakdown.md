@@ -17,7 +17,7 @@ MVP 第一版只承诺 P0 闭环：
 
 | 里程碑 | 名称 | 目标 | 优先级 | 验收口径 |
 | --- | --- | --- | --- | --- |
-| M0 | 项目脚手架与基础规范 | 建立 Python 项目、目录结构、README、配置、基础 schema 和 smoke test | P0 | 本地可安装，`pytest` 可跑基础测试，`scripts/init_db.py` 可初始化数据库 |
+| M0 | 项目脚手架与基础规范 | 建立 Python 项目、目录结构、README、配置、基础 schema 和 smoke test | P0 | 通过 `uv sync --extra dev` 安装依赖，`uv run pytest` 可跑基础测试，`uv run python scripts/init_db.py` 可初始化数据库 |
 | M1 | 数据库 schema 与初始化 | 建立核心表、索引和初始化脚本 | P0 | SQLite 中存在核心表，表结构覆盖 PRD 关键字段 |
 | M2 | 数据导入与字段映射 | 读取订单分析 Excel/CSV、企业清洗结果和关系候选结果 | P0 | 能生成 `import_batch`、`entity`、`entity_alias`、`order_evidence` |
 | M3 | 订单角色边生成 | 生成客户/发货人/收货人/通知人的核心角色边 | P0 | 至少支持 4 类核心边，且每条边可追溯订单证据 |

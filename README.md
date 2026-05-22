@@ -70,24 +70,25 @@ trade-entity-graph/
 
 当前仓库处于 M0 项目脚手架阶段。核心数据导入、关系生成、审核写回和图谱页面将在后续迭代实现。
 
+本项目所有 Python 环境、依赖安装和命令运行统一使用 `uv`，避免污染全局 Python 环境。
+
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-python scripts\init_db.py
-python scripts\run_api.py
+uv python pin 3.12
+uv sync --extra dev
+uv run python scripts\init_db.py
+uv run python scripts\run_api.py
 ```
 
 启动 Streamlit 原型：
 
 ```powershell
-python scripts\run_ui.py
+uv run python scripts\run_ui.py
 ```
 
 运行基础测试：
 
 ```powershell
-pytest
+uv run pytest
 ```
 
 ## 数据流
