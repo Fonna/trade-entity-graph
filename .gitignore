@@ -37,3 +37,6 @@ data/exports/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local isolated worktrees
+.worktrees/
