@@ -95,6 +95,44 @@ def test_graph_svg_renderer_outputs_candidate_and_curated_styles() -> None:
     assert "待审核候选" in svg
 
 
+def test_graph_svg_renderer_places_readable_backgrounds_behind_node_labels() -> None:
+    graph = {
+        "center_entity_id": "ENT_CENTER",
+        "nodes": [
+            {
+                "id": "ENT_CENTER",
+                "label": "CENTER COMPANY WITH LONG NAME",
+                "entity_type": "customer",
+                "tags": None,
+            },
+            {
+                "id": "ENT_FACTORY",
+                "label": "FACTORY COMPANY",
+                "entity_type": "factory",
+                "tags": None,
+            },
+        ],
+        "edges": [
+            {
+                "id": "REL_1",
+                "source": "ENT_CENTER",
+                "target": "ENT_FACTORY",
+                "edge_type": "curated_relationship",
+                "record_type": "curated_relationship",
+                "relation_type": "trading_partner",
+                "status": "verified",
+                "label": "trading_partner / verified",
+            }
+        ],
+    }
+
+    svg = streamlit_app.render_graph_svg(graph, width=640, height=360)
+
+    assert "class='node-label-bg'" in svg
+    assert "class='node-label-text'" in svg
+    assert "CENTER COMPANY WITH..." in svg
+
+
 def test_candidate_edges_returns_pending_relationship_claim_edges() -> None:
     graph = {
         "edges": [
@@ -180,3 +218,63 @@ def test_streamlit_app_exposes_graph_handoff_helpers() -> None:
     assert callable(streamlit_app.set_selected_claim_id)
     assert streamlit_app.SELECTED_CLAIM_STATE_KEY == "selected_claim_id"
     assert streamlit_app.REVIEW_CLAIM_WIDGET_KEY == "review_claim_id"
+
+
+def test_review_relation_type_options_are_controlled_final_values() -> None:
+    assert streamlit_app.RELATION_TYPE_OPTIONS == (
+        "trading_partner",
+        "same_group",
+        "subsidiary",
+        "factory_node",
+        "sales_center",
+        "logistics_service",
+        "same_entity",
+        "co_order_role",
+        "unknown",
+        "rejected_relation",
+    )
+
+
+def test_review_tab_uses_relation_type_selectboxes(monkeypatch) -> None:
+    class FakeStreamlit:
+        def __init__(self) -> None:
+            self.session_state = {}
+            self.selectbox_calls: list[tuple[str, tuple[str, ...]]] = []
+
+        def subheader(self, *_args, **_kwargs) -> None:
+            return None
+
+        def text_input(self, _label, value="", key=None, **_kwargs) -> str:
+            if key is not None:
+                self.session_state.setdefault(key, value)
+                return self.session_state[key]
+            return value
+
+        def selectbox(self, label, options, index=0, **_kwargs) -> str:
+            option_tuple = tuple(options)
+            self.selectbox_calls.append((label, option_tuple))
+            return option_tuple[index]
+
+        def text_area(self, *_args, **_kwargs) -> str:
+            return ""
+
+        def button(self, *_args, **_kwargs) -> bool:
+            return False
+
+        def divider(self) -> None:
+            return None
+
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+
+    streamlit_app.render_review_tab()
+
+    relation_type_calls = {
+        label: options
+        for label, options in fake_st.selectbox_calls
+        if label in {"关系类型", "人工关系类型"}
+    }
+    assert relation_type_calls == {
+        "关系类型": streamlit_app.RELATION_TYPE_OPTIONS,
+        "人工关系类型": streamlit_app.RELATION_TYPE_OPTIONS,
+    }

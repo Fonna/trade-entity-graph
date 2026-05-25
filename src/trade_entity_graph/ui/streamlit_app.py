@@ -31,6 +31,31 @@ TAB_LABELS = ["数据导入", "企业搜索", "关系图谱", "关系详情", "�
 
 SELECTED_CLAIM_STATE_KEY = "selected_claim_id"
 REVIEW_CLAIM_WIDGET_KEY = "review_claim_id"
+DEFAULT_RELATION_TYPE = "trading_partner"
+RELATION_TYPE_OPTIONS: tuple[str, ...] = (
+    "trading_partner",
+    "same_group",
+    "subsidiary",
+    "factory_node",
+    "sales_center",
+    "logistics_service",
+    "same_entity",
+    "co_order_role",
+    "unknown",
+    "rejected_relation",
+)
+RELATION_TYPE_LABELS: dict[str, str] = {
+    "trading_partner": "普通贸易伙伴",
+    "same_group": "同集团",
+    "subsidiary": "子公司或海外公司",
+    "factory_node": "海外工厂或生产节点",
+    "sales_center": "销售中心",
+    "logistics_service": "物流/货代/仓储/清关服务关系",
+    "same_entity": "同一主体",
+    "co_order_role": "订单角色共现",
+    "unknown": "暂不确定",
+    "rejected_relation": "否定关系",
+}
 
 
 class IntroSection(TypedDict):
@@ -118,6 +143,19 @@ def _node_label(node: dict[str, Any]) -> str:
     return label if len(label) <= 22 else f"{label[:19]}..."
 
 
+def _relation_type_index(relation_type: str) -> int:
+    if relation_type in RELATION_TYPE_OPTIONS:
+        return RELATION_TYPE_OPTIONS.index(relation_type)
+    return RELATION_TYPE_OPTIONS.index(DEFAULT_RELATION_TYPE)
+
+
+def format_relation_type_option(relation_type: str) -> str:
+    """Return a user-friendly label while keeping the raw option value stable."""
+
+    description = RELATION_TYPE_LABELS.get(relation_type)
+    return f"{relation_type}（{description}）" if description else relation_type
+
+
 def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 520) -> str:
     """Render a one-hop graph payload as standalone SVG HTML."""
 
@@ -182,16 +220,36 @@ def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 5
         x, y = project(node_id)
         is_center = node_id == center_entity_id
         radius = 34 if is_center else 27
-        fill = "#0f172a" if is_center else "#eff6ff"
-        stroke = "#0f172a" if is_center else "#93c5fd"
-        text_color = "#ffffff" if is_center else "#1e3a8a"
+        fill = "#172554" if is_center else "#ffffff"
+        stroke = "#0f172a" if is_center else "#2563eb"
         label = html.escape(_node_label(node))
         full_label = html.escape(str(node.get("label") or node_id))
+        label_width = min(max(len(label) * 6.5 + 24, 88), 230)
+        label_height = 24
+        label_center_y = y + radius + 20
+        if label_center_y + (label_height / 2) > height - 8:
+            label_center_y = y - radius - 20
+        label_x = min(max(x - (label_width / 2), 8), width - label_width - 8)
+        label_y = label_center_y - (label_height / 2)
+        text_x = label_x + (label_width / 2)
+        text_y = label_center_y + 4
+        center_badge = ""
+        if is_center:
+            center_badge = (
+                f"<text x='{x:.1f}' y='{y + 4:.1f}' text-anchor='middle' "
+                "font-size='12' font-weight='800' fill='#ffffff'>主体</text>"
+            )
         node_markup.append(
-            f"<g><circle cx='{x:.1f}' cy='{y:.1f}' r='{radius}' fill='{fill}' "
-            f"stroke='{stroke}' stroke-width='2'><title>{full_label}</title></circle>"
-            f"<text x='{x:.1f}' y='{y + 4:.1f}' text-anchor='middle' "
-            f"font-size='11' font-weight='700' fill='{text_color}'>{label}</text></g>"
+            f"<g><circle class='node-circle' cx='{x:.1f}' cy='{y:.1f}' "
+            f"r='{radius}' fill='{fill}' stroke='{stroke}' stroke-width='2.5'>"
+            f"<title>{full_label}</title></circle>{center_badge}"
+            f"<rect class='node-label-bg' x='{label_x:.1f}' y='{label_y:.1f}' "
+            f"width='{label_width:.1f}' height='{label_height}' rx='9' "
+            "fill='#ffffff' fill-opacity='0.96' stroke='#cbd5e1' "
+            "stroke-width='1.1' />"
+            f"<text class='node-label-text' x='{text_x:.1f}' y='{text_y:.1f}' "
+            "text-anchor='middle' font-size='11' font-weight='800' "
+            f"fill='#0f172a'>{label}</text></g>"
         )
 
     empty_hint = ""
@@ -205,7 +263,14 @@ def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 5
     <div style="border:1px solid #dbe5ef;border-radius:18px;padding:12px;background:#f8fafc;">
       <svg viewBox="0 0 {width} {height}" width="100%" height="{height}"
            role="img" aria-label="relationship graph">
-        <rect x="0" y="0" width="{width}" height="{height}" rx="18" fill="#f8fafc" />
+        <defs>
+          <pattern id="soft-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+            <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#dbeafe" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect x="0" y="0" width="{width}" height="{height}" rx="18" fill="#f1f5f9" />
+        <rect x="0" y="0" width="{width}" height="{height}" rx="18"
+              fill="url(#soft-grid)" opacity="0.45" />
         {"".join(edge_markup)}
         {"".join(node_markup)}
         {empty_hint}
@@ -377,7 +442,15 @@ def render_review_tab() -> None:
         st.session_state[REVIEW_CLAIM_WIDGET_KEY] = selected_claim_id
     claim_id = st.text_input("候选关系 ID", key=REVIEW_CLAIM_WIDGET_KEY)
     action_type = st.selectbox("审核动作", ["confirm", "reject", "modify"])
-    relation_type = st.text_input("关系类型", value="trading_partner")
+    default_relation_type = (
+        "rejected_relation" if action_type == "reject" else DEFAULT_RELATION_TYPE
+    )
+    relation_type = st.selectbox(
+        "关系类型",
+        RELATION_TYPE_OPTIONS,
+        index=_relation_type_index(default_relation_type),
+        format_func=format_relation_type_option,
+    )
     reason = st.text_area("判断理由")
     operator = st.text_input("操作人", value="local_user")
     if st.button("提交审核") and claim_id:
@@ -395,7 +468,12 @@ def render_review_tab() -> None:
     st.subheader("人工新增关系")
     from_entity_id = st.text_input("起点企业 ID")
     to_entity_id = st.text_input("终点企业 ID")
-    manual_relation_type = st.text_input("人工关系类型", value="trading_partner")
+    manual_relation_type = st.selectbox(
+        "人工关系类型",
+        RELATION_TYPE_OPTIONS,
+        index=_relation_type_index(DEFAULT_RELATION_TYPE),
+        format_func=format_relation_type_option,
+    )
     manual_reason = st.text_area("人工新增理由")
     if st.button("创建人工关系") and from_entity_id and to_entity_id:
         st.json(
