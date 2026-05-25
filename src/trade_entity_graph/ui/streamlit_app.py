@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, MutableMapping, TypedDict
 
+import networkx as nx
 import streamlit as st
 
 from trade_entity_graph.importers.models import ImportInputs
@@ -24,6 +26,9 @@ from trade_entity_graph.services.review_service import (
 )
 
 TAB_LABELS = ["数据导入", "企业搜索", "关系图谱", "关系详情", "人工审核", "导出"]
+
+SELECTED_CLAIM_STATE_KEY = "selected_claim_id"
+REVIEW_CLAIM_WIDGET_KEY = "review_claim_id"
 
 
 class IntroSection(TypedDict):
@@ -71,6 +76,145 @@ INTRO_SECTIONS: list[IntroSection] = [
         ],
     },
 ]
+
+
+def get_selected_claim_id(
+    *, state: MutableMapping[str, Any] | None = None
+) -> str:
+    """Return the claim id selected from the graph tab."""
+
+    target_state = st.session_state if state is None else state
+    return str(target_state.get(SELECTED_CLAIM_STATE_KEY, "") or "")
+
+
+def set_selected_claim_id(
+    claim_id: str,
+    *, state: MutableMapping[str, Any] | None = None,
+) -> str:
+    """Persist a selected claim id for the manual review tab."""
+
+    target_state = st.session_state if state is None else state
+    target_state[SELECTED_CLAIM_STATE_KEY] = claim_id
+    target_state[REVIEW_CLAIM_WIDGET_KEY] = claim_id
+    return claim_id
+
+
+def _edge_style(edge: dict[str, Any]) -> dict[str, str]:
+    edge_type = edge.get("edge_type")
+    status = edge.get("status")
+    if edge_type == "relationship_claim":
+        return {"color": "#f59e0b", "dash": "10 7", "width": "3"}
+    if edge_type == "curated_relationship" and status == "rejected":
+        return {"color": "#ef4444", "dash": "6 6", "width": "2"}
+    if edge_type == "curated_relationship":
+        return {"color": "#2563eb", "dash": "", "width": "3"}
+    return {"color": "#64748b", "dash": "3 7", "width": "1.8"}
+
+
+def _node_label(node: dict[str, Any]) -> str:
+    label = str(node.get("label") or node.get("id") or "")
+    return label if len(label) <= 22 else f"{label[:19]}..."
+
+
+def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 520) -> str:
+    """Render a one-hop graph payload as standalone SVG HTML."""
+
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+    center_entity_id = graph.get("center_entity_id")
+    if not nodes:
+        escaped_center = html.escape(str(center_entity_id or ""))
+        return (
+            f"<div style='padding:24px;border:1px solid #e2e8f0;border-radius:16px;'>"
+            f"未找到企业或暂无节点：<code>{escaped_center}</code></div>"
+        )
+
+    nx_graph = nx.Graph()
+    for node in nodes:
+        nx_graph.add_node(node["id"])
+    for edge in edges:
+        if edge.get("source") in nx_graph and edge.get("target") in nx_graph:
+            nx_graph.add_edge(edge["source"], edge["target"])
+
+    if len(nx_graph.nodes) == 1:
+        positions = {next(iter(nx_graph.nodes)): (0.0, 0.0)}
+    else:
+        positions = nx.spring_layout(nx_graph, seed=42)
+    if center_entity_id in positions:
+        positions[center_entity_id] = (0.0, 0.0)
+
+    xs = [point[0] for point in positions.values()]
+    ys = [point[1] for point in positions.values()]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    span_x = max(max_x - min_x, 0.1)
+    span_y = max(max_y - min_y, 0.1)
+
+    def project(node_id: str) -> tuple[float, float]:
+        x, y = positions[node_id]
+        px = 70 + ((x - min_x) / span_x) * (width - 140)
+        py = 70 + ((y - min_y) / span_y) * (height - 140)
+        return px, py
+
+    edge_markup: list[str] = []
+    for edge in edges:
+        source = edge.get("source")
+        target = edge.get("target")
+        if source not in positions or target not in positions:
+            continue
+        x1, y1 = project(source)
+        x2, y2 = project(target)
+        style = _edge_style(edge)
+        dash = f" stroke-dasharray='{style['dash']}'" if style["dash"] else ""
+        title = html.escape(f"{edge.get('id', '')} {edge.get('label', '')}")
+        edge_markup.append(
+            f"<line x1='{x1:.1f}' y1='{y1:.1f}' x2='{x2:.1f}' y2='{y2:.1f}' "
+            f"stroke='{style['color']}' stroke-width='{style['width']}'{dash}>"
+            f"<title>{title}</title></line>"
+        )
+
+    node_by_id = {node["id"]: node for node in nodes}
+    node_markup: list[str] = []
+    for node_id in nx_graph.nodes:
+        node = node_by_id[node_id]
+        x, y = project(node_id)
+        is_center = node_id == center_entity_id
+        radius = 34 if is_center else 27
+        fill = "#0f172a" if is_center else "#eff6ff"
+        stroke = "#0f172a" if is_center else "#93c5fd"
+        text_color = "#ffffff" if is_center else "#1e3a8a"
+        label = html.escape(_node_label(node))
+        full_label = html.escape(str(node.get("label") or node_id))
+        node_markup.append(
+            f"<g><circle cx='{x:.1f}' cy='{y:.1f}' r='{radius}' fill='{fill}' "
+            f"stroke='{stroke}' stroke-width='2'><title>{full_label}</title></circle>"
+            f"<text x='{x:.1f}' y='{y + 4:.1f}' text-anchor='middle' "
+            f"font-size='11' font-weight='700' fill='{text_color}'>{label}</text></g>"
+        )
+
+    empty_hint = ""
+    if not edges:
+        empty_hint = (
+            f"<text x='{width / 2:.1f}' y='{height - 34}' text-anchor='middle' "
+            "fill='#64748b' font-size='14'>暂无一跳关系</text>"
+        )
+
+    return f"""
+    <div style="border:1px solid #dbe5ef;border-radius:18px;padding:12px;background:#f8fafc;">
+      <svg viewBox="0 0 {width} {height}" width="100%" height="{height}"
+           role="img" aria-label="relationship graph">
+        <rect x="0" y="0" width="{width}" height="{height}" rx="18" fill="#f8fafc" />
+        {"".join(edge_markup)}
+        {"".join(node_markup)}
+        {empty_hint}
+      </svg>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;color:#334155;font-size:13px;">
+        <span><b style="color:#2563eb;">蓝色实线</b> 最终关系</span>
+        <span><b style="color:#f59e0b;">橙色虚线</b> 待审核候选</span>
+        <span><b style="color:#64748b;">灰色点线</b> 订单证据</span>
+      </div>
+    </div>
+    """
 
 
 def render_intro() -> None:
