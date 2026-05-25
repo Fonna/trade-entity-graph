@@ -10,7 +10,11 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.generate_demo_data import write_demo_data
 from scripts.import_demo_data import import_demo_data
+from scripts.seed_demo_reviews import seed_demo_reviews
 from trade_entity_graph.db.connection import get_connection
+from trade_entity_graph.services.export_service import export_relationship_rows
+from trade_entity_graph.services.graph_service import get_ego_graph
+from trade_entity_graph.services.relationship_service import get_relationship_evidence
 
 
 def test_generate_demo_data_writes_importable_files(tmp_path) -> None:
@@ -130,3 +134,101 @@ def test_import_demo_data_loads_sources_edges_claims_and_supplemental_candidates
     assert {"high", "medium", "low"}.issubset(confidence_levels)
     assert archived_roles == {"entities", "orders"}
     assert supplemental == result["supplemental_candidate_count"]
+
+
+def _entity_id(db_path: Path, canonical_name: str) -> str:
+    with get_connection(db_path) as connection:
+        row = connection.execute(
+            "SELECT entity_id FROM entity WHERE canonical_name = ?",
+            (canonical_name,),
+        ).fetchone()
+    assert row is not None
+    return row["entity_id"]
+
+
+def test_demo_acceptance_flow_imports_reviews_graphs_and_exports(tmp_path, monkeypatch) -> None:
+    output_dir = tmp_path / "demo"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+    write_demo_data(output_dir)
+    import_demo_data(output_dir=output_dir, db_path=db_path)
+
+    seed_result = seed_demo_reviews(db_path=db_path)
+
+    with get_connection(db_path) as connection:
+        curated_count = connection.execute(
+            "SELECT COUNT(*) FROM curated_relationship"
+        ).fetchone()[0]
+        decision_count = connection.execute(
+            "SELECT COUNT(*) FROM relationship_decision"
+        ).fetchone()[0]
+        audit_count = connection.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
+        relation_types = {
+            row["relation_type"]
+            for row in connection.execute(
+                "SELECT DISTINCT relation_type FROM curated_relationship"
+            ).fetchall()
+        }
+        statuses = {
+            row["relation_status"]
+            for row in connection.execute(
+                "SELECT DISTINCT relation_status FROM curated_relationship"
+            ).fetchall()
+        }
+        pending_claims = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM relationship_claim rc
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM curated_relationship cr
+                WHERE cr.decision_source = rc.claim_id
+            )
+            """
+        ).fetchone()[0]
+        center_id = _entity_id(db_path, "APEX OUTDOOR USA")
+        rejected_relationship_id = connection.execute(
+            """
+            SELECT relationship_id
+            FROM curated_relationship
+            WHERE relation_status = 'rejected'
+              AND (from_entity_id = ? OR to_entity_id = ?)
+            LIMIT 1
+            """,
+            (center_id, center_id),
+        ).fetchone()["relationship_id"]
+
+    assert seed_result["created_relationship_count"] >= 12
+    assert curated_count == seed_result["created_relationship_count"]
+    assert decision_count == curated_count
+    assert audit_count == curated_count
+    assert {
+        "same_group",
+        "subsidiary",
+        "factory_node",
+        "sales_center",
+        "trading_partner",
+        "logistics_service",
+        "rejected_relation",
+    }.issubset(relation_types)
+    assert {"verified", "rejected", "manual_only"}.issubset(statuses)
+    assert pending_claims >= 10
+
+    graph = get_ego_graph(center_id, db_path=db_path)
+    graph_with_rejected = get_ego_graph(center_id, db_path=db_path, include_rejected=True)
+    exported = export_relationship_rows(center_id, db_path=db_path)
+    evidence = []
+    for row in exported:
+        evidence = get_relationship_evidence(row["relationship_id"], db_path=db_path)
+        if evidence:
+            break
+
+    assert graph["summary"]["node_count"] >= 5
+    assert graph["summary"]["edge_count"] >= 10
+    assert all(edge["status"] != "rejected" for edge in graph["edges"])
+    assert any(edge["id"] == rejected_relationship_id for edge in graph_with_rejected["edges"])
+    assert exported
+    assert evidence
+
+    second_seed = seed_demo_reviews(db_path=db_path)
+    assert second_seed["skipped"] is True
