@@ -9,6 +9,7 @@ from trade_entity_graph.services.graph_service import get_ego_graph
 from trade_entity_graph.services.relationship_service import (
     aggregate_relationship_claims,
     generate_order_role_edges,
+    get_relationship_detail,
 )
 from trade_entity_graph.services.review_service import (
     create_manual_relationship,
@@ -141,3 +142,92 @@ def test_entity_search_detail_graph_review_and_export_p0_flow(tmp_path) -> None:
 
     assert decision_count == 4
     assert audit_count == 4
+
+
+def test_ego_graph_includes_pending_claims_and_hides_reviewed_claims(tmp_path) -> None:
+    db_path = _seed_p0_flow(tmp_path)
+    acme_id = _entity_id(db_path, "ACME TRADING")
+    beta_claim_id = _claim_id(db_path, "ACME TRADING", "BETA FACTORY")
+
+    graph = get_ego_graph(acme_id, db_path=db_path)
+
+    pending_claim_edges = [
+        edge for edge in graph["edges"] if edge["edge_type"] == "relationship_claim"
+    ]
+    pending_claim_ids = {edge["id"] for edge in pending_claim_edges}
+
+    assert beta_claim_id in pending_claim_ids
+    beta_claim_edge = next(edge for edge in pending_claim_edges if edge["id"] == beta_claim_id)
+    assert beta_claim_edge["record_type"] == "relationship_claim"
+    assert beta_claim_edge["relation_type"] == "trading_partner_candidate"
+    assert beta_claim_edge["status"] == "candidate"
+    assert beta_claim_edge["confidence_level"] == "medium"
+    assert beta_claim_edge["confidence_score"] == 0.55
+    assert beta_claim_edge["order_count"] == 2
+    assert beta_claim_edge["total_teu"] == 7.5
+    assert beta_claim_edge["source_label"] == "ACME TRADING"
+    assert beta_claim_edge["target_label"] == "BETA FACTORY"
+    assert "2 orders" in beta_claim_edge["label"]
+
+    beta_claim_detail = get_relationship_detail(beta_claim_id, db_path=db_path)
+
+    assert beta_claim_detail is not None
+    assert beta_claim_detail["from_name"] == "ACME TRADING"
+    assert beta_claim_detail["to_name"] == "BETA FACTORY"
+
+    reviewed = decide_relationship(
+        beta_claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Confirmed by graph review",
+        operator="tester",
+        db_path=db_path,
+    )
+    reviewed_graph = get_ego_graph(acme_id, db_path=db_path)
+
+    reviewed_pending_ids = {
+        edge["id"]
+        for edge in reviewed_graph["edges"]
+        if edge["edge_type"] == "relationship_claim"
+    }
+    curated_ids = {
+        edge["id"]
+        for edge in reviewed_graph["edges"]
+        if edge["edge_type"] == "curated_relationship"
+    }
+
+    assert beta_claim_id not in reviewed_pending_ids
+    assert reviewed["relationship_id"] in curated_ids
+
+
+def test_ego_graph_hides_rejected_relationship_nodes_by_default(tmp_path) -> None:
+    db_path = _seed_p0_flow(tmp_path)
+    acme_id = _entity_id(db_path, "ACME TRADING")
+    omega_id = _entity_id(db_path, "OMEGA BUYER")
+    rejected = decide_relationship(
+        _claim_id(db_path, "ACME TRADING", "OMEGA BUYER"),
+        action_type="reject",
+        relation_type="rejected_relation",
+        reason="Rejected by graph review",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            DELETE FROM order_role_edge
+            WHERE (from_entity_id = ? AND to_entity_id = ?)
+               OR (from_entity_id = ? AND to_entity_id = ?)
+            """,
+            (acme_id, omega_id, omega_id, acme_id),
+        )
+        connection.commit()
+
+    graph = get_ego_graph(acme_id, db_path=db_path)
+    graph_with_rejected = get_ego_graph(acme_id, db_path=db_path, include_rejected=True)
+
+    assert omega_id not in {node["id"] for node in graph["nodes"]}
+    assert all(edge["id"] != rejected["relationship_id"] for edge in graph["edges"])
+    assert omega_id in {node["id"] for node in graph_with_rejected["nodes"]}
+    assert any(edge["id"] == rejected["relationship_id"] for edge in graph_with_rejected["edges"])
