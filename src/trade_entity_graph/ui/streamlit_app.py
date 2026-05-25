@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import html
+from collections.abc import MutableMapping
 from pathlib import Path
-from typing import Any, MutableMapping, TypedDict
+from typing import Any, TypedDict
 
 import networkx as nx
 import streamlit as st

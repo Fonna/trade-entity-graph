@@ -90,52 +90,6 @@ def get_ego_graph(
     """Return one-hop nodes and edges around a center entity."""
 
     with get_connection(db_path) as connection:
-        entity_rows = connection.execute(
-            """
-            SELECT DISTINCT e.*
-            FROM entity e
-            WHERE e.entity_id = ?
-               OR e.entity_id IN (
-                    SELECT to_entity_id FROM order_role_edge WHERE from_entity_id = ?
-                    UNION
-                    SELECT from_entity_id FROM order_role_edge WHERE to_entity_id = ?
-                    UNION
-                    SELECT to_entity_id FROM curated_relationship WHERE from_entity_id = ?
-                    UNION
-                    SELECT from_entity_id FROM curated_relationship WHERE to_entity_id = ?
-                    UNION
-                    SELECT to_entity_id
-                    FROM relationship_claim rc
-                    WHERE rc.from_entity_id = ?
-                      AND rc.relation_status IN ('candidate', 'pending_verify')
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM curated_relationship cr
-                          WHERE cr.decision_source = rc.claim_id
-                      )
-                    UNION
-                    SELECT from_entity_id
-                    FROM relationship_claim rc
-                    WHERE rc.to_entity_id = ?
-                      AND rc.relation_status IN ('candidate', 'pending_verify')
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM curated_relationship cr
-                          WHERE cr.decision_source = rc.claim_id
-                      )
-               )
-            ORDER BY e.canonical_name
-            """,
-            (
-                center_entity_id,
-                center_entity_id,
-                center_entity_id,
-                center_entity_id,
-                center_entity_id,
-                center_entity_id,
-                center_entity_id,
-            ),
-        ).fetchall()
         order_edges = connection.execute(
             """
             SELECT * FROM order_role_edge
@@ -158,25 +112,41 @@ def get_ego_graph(
                 ORDER BY created_at
             """
         curated_edges = connection.execute(curated_sql, curated_params).fetchall()
+        pending_status_placeholders = ", ".join("?" for _ in PENDING_CLAIM_STATUSES)
         claim_edges = connection.execute(
-            """
+            f"""
             SELECT *
             FROM relationship_claim rc
             WHERE (rc.from_entity_id = ? OR rc.to_entity_id = ?)
-              AND rc.relation_status IN ('candidate', 'pending_verify')
+              AND rc.relation_status IN ({pending_status_placeholders})
               AND NOT EXISTS (
                   SELECT 1
                   FROM curated_relationship cr
                   WHERE cr.decision_source = rc.claim_id
-              )
+            )
             ORDER BY rc.confidence_score DESC, rc.order_count DESC, rc.created_at
             """,
-            (center_entity_id, center_entity_id),
+            (center_entity_id, center_entity_id, *PENDING_CLAIM_STATUSES),
         ).fetchall()
 
         edges = [_order_edge(row) for row in order_edges]
         edges.extend(_curated_edge(row) for row in curated_edges)
         edges.extend(_claim_edge(row) for row in claim_edges)
+
+        visible_entity_ids = {center_entity_id}
+        for edge in edges:
+            visible_entity_ids.add(edge["source"])
+            visible_entity_ids.add(edge["target"])
+        entity_placeholders = ", ".join("?" for _ in visible_entity_ids)
+        entity_rows = connection.execute(
+            f"""
+            SELECT DISTINCT e.*
+            FROM entity e
+            WHERE e.entity_id IN ({entity_placeholders})
+            ORDER BY e.canonical_name
+            """,
+            tuple(visible_entity_ids),
+        ).fetchall()
 
         return {
             "center_entity_id": center_entity_id,

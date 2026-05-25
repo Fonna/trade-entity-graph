@@ -189,3 +189,36 @@ def test_ego_graph_includes_pending_claims_and_hides_reviewed_claims(tmp_path) -
 
     assert beta_claim_id not in reviewed_pending_ids
     assert reviewed["relationship_id"] in curated_ids
+
+
+def test_ego_graph_hides_rejected_relationship_nodes_by_default(tmp_path) -> None:
+    db_path = _seed_p0_flow(tmp_path)
+    acme_id = _entity_id(db_path, "ACME TRADING")
+    omega_id = _entity_id(db_path, "OMEGA BUYER")
+    rejected = decide_relationship(
+        _claim_id(db_path, "ACME TRADING", "OMEGA BUYER"),
+        action_type="reject",
+        relation_type="rejected_relation",
+        reason="Rejected by graph review",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            DELETE FROM order_role_edge
+            WHERE (from_entity_id = ? AND to_entity_id = ?)
+               OR (from_entity_id = ? AND to_entity_id = ?)
+            """,
+            (acme_id, omega_id, omega_id, acme_id),
+        )
+        connection.commit()
+
+    graph = get_ego_graph(acme_id, db_path=db_path)
+    graph_with_rejected = get_ego_graph(acme_id, db_path=db_path, include_rejected=True)
+
+    assert omega_id not in {node["id"] for node in graph["nodes"]}
+    assert all(edge["id"] != rejected["relationship_id"] for edge in graph["edges"])
+    assert omega_id in {node["id"] for node in graph_with_rejected["nodes"]}
+    assert any(edge["id"] == rejected["relationship_id"] for edge in graph_with_rejected["edges"])
