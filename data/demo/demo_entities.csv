@@ -1,0 +1,51 @@
+canonical_name,original_name,clean_name,alias_name,country,entity_type
+APEX GLOBAL HOLDINGS,Apex Global Holdings Ltd,APEX GLOBAL HOLDINGS LTD,Apex Group,US,group
+APEX OUTDOOR USA,Apex Outdoor USA Inc,APEX OUTDOOR USA INC,Apex Outdoor,US,customer
+APEX OUTDOOR EUROPE,Apex Outdoor Europe GmbH,APEX OUTDOOR EUROPE GMBH,Apex Europe,DE,sales_center
+APEX SOURCING SHENZHEN,Apex Sourcing Shenzhen Co Ltd,APEX SOURCING SHENZHEN CO LTD,Apex Shenzhen,CN,trader
+NOVA RETAIL GROUP,Nova Retail Group LLC,NOVA RETAIL GROUP LLC,Nova Retail,US,group
+NOVA HOME STORES,Nova Home Stores Inc,NOVA HOME STORES INC,Nova Home,US,customer
+NOVA EUROPE BUYING,Nova Europe Buying BV,NOVA EUROPE BUYING BV,Nova Europe,NL,sales_center
+ORBIT COMMERCE HOLDINGS,Orbit Commerce Holdings Ltd,ORBIT COMMERCE HOLDINGS LTD,Orbit Group,GB,group
+ORBIT MARKETPLACE,Orbit Marketplace Inc,ORBIT MARKETPLACE INC,Orbit Market,US,customer
+ORBIT CANADA BUYING,Orbit Canada Buying Ltd,ORBIT CANADA BUYING LTD,Orbit Canada,CA,buyer
+LUMEN BRANDS,Lumen Brands LLC,LUMEN BRANDS LLC,Lumen,US,customer
+LUMEN LATAM IMPORTS,Lumen Latam Imports SA,LUMEN LATAM IMPORTS SA,Lumen Latam,MX,buyer
+MERIDIAN SUPPLY CHAIN,Meridian Supply Chain Ltd,MERIDIAN SUPPLY CHAIN LTD,Meridian Supply,SG,trader
+PACIFIC HOME BUYING,Pacific Home Buying Pty Ltd,PACIFIC HOME BUYING PTY LTD,Pacific Home,AU,buyer
+HARBOR WHOLESALE,Harbor Wholesale Co,HARBOR WHOLESALE CO,Harbor Wholesale,US,customer
+SUMMIT DIGITAL RETAIL,Summit Digital Retail Inc,SUMMIT DIGITAL RETAIL INC,Summit Digital,US,customer
+BLUE RIDGE SOURCING,Blue Ridge Sourcing LLC,BLUE RIDGE SOURCING LLC,Blue Ridge,US,trader
+DRAGON PEAK MANUFACTURING,Dragon Peak Manufacturing Co Ltd,DRAGON PEAK MANUFACTURING CO LTD,Dragon Peak,CN,factory
+DRAGON PEAK VIETNAM,Dragon Peak Vietnam Ltd,DRAGON PEAK VIETNAM LTD,Dragon Vietnam,VN,factory
+SUNRISE PLASTICS NINGBO,Sunrise Plastics Ningbo Co Ltd,SUNRISE PLASTICS NINGBO CO LTD,Sunrise Ningbo,CN,factory
+SUNRISE PLASTICS THAILAND,Sunrise Plastics Thailand Ltd,SUNRISE PLASTICS THAILAND LTD,Sunrise Thailand,TH,factory
+RIVERSTONE METALWORKS,Riverstone Metalworks Co Ltd,RIVERSTONE METALWORKS CO LTD,Riverstone,CN,factory
+RIVERSTONE CAMBODIA,Riverstone Cambodia Ltd,RIVERSTONE CAMBODIA LTD,Riverstone KH,KH,factory
+EASTWIND TEXTILES,Eastwind Textiles Co Ltd,EASTWIND TEXTILES CO LTD,Eastwind,CN,factory
+EASTWIND BANGLADESH,Eastwind Bangladesh Ltd,EASTWIND BANGLADESH LTD,Eastwind BD,BD,factory
+GREENFIELD ELECTRONICS,Greenfield Electronics Co Ltd,GREENFIELD ELECTRONICS CO LTD,Greenfield,CN,factory
+GREENFIELD MALAYSIA,Greenfield Malaysia Sdn Bhd,GREENFIELD MALAYSIA SDN BHD,Greenfield MY,MY,factory
+ORIENTAL CERAMICS,Oriental Ceramics Ltd,ORIENTAL CERAMICS LTD,Oriental Ceramics,CN,factory
+ORIENTAL CERAMICS INDONESIA,Oriental Ceramics Indonesia PT,ORIENTAL CERAMICS INDONESIA PT,Oriental ID,ID,factory
+ALPINE TOOLING,Alpine Tooling Co Ltd,ALPINE TOOLING CO LTD,Alpine Tooling,CN,factory
+SILVERLINE PACKAGING,Silverline Packaging Ltd,SILVERLINE PACKAGING LTD,Silverline,CN,factory
+AURORA LIGHTING FACTORY,Aurora Lighting Factory Ltd,AURORA LIGHTING FACTORY LTD,Aurora Lighting,CN,factory
+CRESCENT FURNITURE WORKS,Crescent Furniture Works Ltd,CRESCENT FURNITURE WORKS LTD,Crescent Furniture,VN,factory
+NORTHSTAR DISTRIBUTION,Northstar Distribution Inc,NORTHSTAR DISTRIBUTION INC,Northstar,US,buyer
+MAPLE LEAF IMPORTS,Maple Leaf Imports Ltd,MAPLE LEAF IMPORTS LTD,Maple Leaf,CA,buyer
+IBERIA RETAIL IMPORTS,Iberia Retail Imports SL,IBERIA RETAIL IMPORTS SL,Iberia Imports,ES,buyer
+RHINE HOME IMPORTS,Rhine Home Imports GmbH,RHINE HOME IMPORTS GMBH,Rhine Home,DE,buyer
+SAHARA TRADE HOUSE,Sahara Trade House LLC,SAHARA TRADE HOUSE LLC,Sahara Trade,AE,buyer
+ANDES MARKET SUPPLY,Andes Market Supply SAC,ANDES MARKET SUPPLY SAC,Andes Supply,PE,buyer
+ATLAS MEXICO DISTRIBUTION,Atlas Mexico Distribution SA,ATLAS MEXICO DISTRIBUTION SA,Atlas Mexico,MX,buyer
+CAPE TOWN RETAIL IMPORTS,Cape Town Retail Imports Pty,CAPE TOWN RETAIL IMPORTS PTY,Cape Retail,ZA,buyer
+YQN LOGISTICS,YQN Logistics Co Ltd,YQN LOGISTICS CO LTD,YQN,CN,logistics
+OCEANBRIDGE LOGISTICS,Oceanbridge Logistics Ltd,OCEANBRIDGE LOGISTICS LTD,Oceanbridge,CN,logistics
+SKYLINE FREIGHT FORWARDING,Skyline Freight Forwarding Ltd,SKYLINE FREIGHT FORWARDING LTD,Skyline Freight,CN,logistics
+TRANSWORLD CARGO SERVICES,Transworld Cargo Services Ltd,TRANSWORLD CARGO SERVICES LTD,Transworld Cargo,SG,logistics
+GLOBEWAY SHIPPING,Globeway Shipping Ltd,GLOBEWAY SHIPPING LTD,Globeway,HK,logistics
+APEX GLOBAL SOURCING HK,Apex Global Sourcing HK Ltd,APEX GLOBAL SOURCING HK LTD,Apex HK,HK,subsidiary
+NOVA SOURCING SHANGHAI,Nova Sourcing Shanghai Co Ltd,NOVA SOURCING SHANGHAI CO LTD,Nova Shanghai,CN,subsidiary
+ORBIT ASIA PROCUREMENT,Orbit Asia Procurement Ltd,ORBIT ASIA PROCUREMENT LTD,Orbit Asia,SG,subsidiary
+UNMATCHED LEGACY TRADER,Unmatched Legacy Trader Ltd,UNMATCHED LEGACY TRADER LTD,Legacy Trader,HK,unknown

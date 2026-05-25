@@ -1,0 +1,7 @@
+from_canonical_name,to_canonical_name,candidate_relation_type,confidence_level,confidence_score,order_count,total_teu,recommendation_reason
+APEX GLOBAL HOLDINGS,APEX GLOBAL SOURCING HK,same_group_candidate,high,0.92,8,36.0,Shared Apex branding and repeated notify roles
+NOVA RETAIL GROUP,NOVA SOURCING SHANGHAI,subsidiary_candidate,high,0.9,7,25.0,Nova sourcing office appears in China-side order roles
+ORBIT COMMERCE HOLDINGS,ORBIT ASIA PROCUREMENT,subsidiary_candidate,high,0.88,7,21.0,Orbit procurement center supports Orbit customer orders
+OCEANBRIDGE LOGISTICS,APEX OUTDOOR USA,logistics_service_candidate,medium,0.63,2,2.4,Logistics provider appears in Apex service lanes
+SKYLINE FREIGHT FORWARDING,NOVA HOME STORES,logistics_service_candidate,medium,0.58,2,3.0,Freight forwarder relationship supplied by demo knowledge
+UNMATCHED LEGACY TRADER,APEX OUTDOOR USA,unknown_candidate,low,0.22,1,0.5,Legacy noisy record retained for rejection demo
