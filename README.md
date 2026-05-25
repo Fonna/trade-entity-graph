@@ -163,7 +163,7 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-验证结果：`17 passed`，ruff `All checks passed!`。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
+验证结果：`18 passed`，ruff `All checks passed!`。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
 
 ## 推荐开发顺序
 

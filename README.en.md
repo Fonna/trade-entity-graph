@@ -163,7 +163,7 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-Result: `17 passed`, ruff `All checks passed!`. A `.pytest_cache` write-permission warning may appear in the current desktop sandbox and does not affect the test result.
+Result: `18 passed`, ruff `All checks passed!`. A `.pytest_cache` write-permission warning may appear in the current desktop sandbox and does not affect the test result.
 
 ## Recommended Development Order
 

@@ -163,4 +163,4 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-当前通过标准：全量测试 17 passed，M8 专项测试 3 passed，ruff 0 errors。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
+当前通过标准：全量测试 18 passed，M8 专项测试 3 passed，ruff 0 errors。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。

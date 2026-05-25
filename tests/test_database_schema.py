@@ -57,3 +57,37 @@ def test_get_connection_enables_foreign_keys(tmp_path) -> None:
         pragma = connection.execute("PRAGMA foreign_keys").fetchone()
 
     assert pragma[0] == 1
+
+
+def test_initialize_database_adds_missing_order_evidence_role_columns(tmp_path) -> None:
+    db_path = tmp_path / "legacy_trade_entity_graph.db"
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE order_evidence (
+                evidence_id TEXT PRIMARY KEY,
+                order_id TEXT,
+                teu REAL,
+                product_name TEXT,
+                function_category TEXT,
+                destination_country TEXT,
+                destination_port TEXT,
+                order_date TEXT,
+                source_file TEXT,
+                source_sheet TEXT,
+                source_row INTEGER,
+                run_id TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+
+    with get_connection(db_path) as connection:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(order_evidence)")
+        }
+
+    assert {"customer_name", "shipper_name", "consignee_name", "notify_name"}.issubset(columns)
