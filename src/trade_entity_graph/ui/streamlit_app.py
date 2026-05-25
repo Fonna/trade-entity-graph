@@ -156,6 +156,82 @@ def format_relation_type_option(relation_type: str) -> str:
     return f"{relation_type}（{description}）" if description else relation_type
 
 
+def _short_edge_label(edge: dict[str, Any]) -> str:
+    label = str(edge.get("relation_type") or edge.get("label") or "")
+    return label if len(label) <= 28 else f"{label[:25]}..."
+
+
+def _edge_endpoint_label(edge: dict[str, Any], label_key: str, id_key: str) -> str:
+    return str(
+        edge.get(label_key)
+        or edge.get(label_key.replace("_label", "_name"))
+        or edge.get(id_key)
+        or "-"
+    )
+
+
+def with_edge_display_names(
+    edge: dict[str, Any], node_labels_by_id: dict[str, str]
+) -> dict[str, Any]:
+    """Return an edge copy with readable endpoint names filled from graph nodes."""
+
+    enriched = dict(edge)
+    source = str(edge.get("source") or "")
+    target = str(edge.get("target") or "")
+    enriched.setdefault("source_label", node_labels_by_id.get(source, source or "-"))
+    enriched.setdefault("target_label", node_labels_by_id.get(target, target or "-"))
+    return enriched
+
+
+def format_entity_reference(
+    entity: dict[str, Any] | None, *, fallback_id: str = ""
+) -> str:
+    """Format an entity id/name pair for manual review context."""
+
+    if not entity:
+        return f"未找到企业：{fallback_id}" if fallback_id else "未找到企业"
+
+    entity_id = str(entity.get("entity_id") or fallback_id or "-")
+    name = str(entity.get("canonical_name") or entity.get("label") or "-")
+    return f"{name} ({entity_id})"
+
+
+def format_relationship_detail_summary(detail: dict[str, Any] | None) -> str:
+    """Format relationship/candidate details with endpoint names for reviewers."""
+
+    if not detail:
+        return "未找到候选关系或最终关系，请检查 ID 是否正确。"
+
+    relationship_id = (
+        detail.get("claim_id") or detail.get("relationship_id") or detail.get("id") or "-"
+    )
+    from_entity_id = str(detail.get("from_entity_id") or detail.get("source") or "")
+    to_entity_id = str(detail.get("to_entity_id") or detail.get("target") or "")
+    from_entity = format_entity_reference(
+        {
+            "entity_id": from_entity_id,
+            "canonical_name": detail.get("from_name") or detail.get("source_label"),
+        },
+        fallback_id=from_entity_id,
+    )
+    to_entity = format_entity_reference(
+        {
+            "entity_id": to_entity_id,
+            "canonical_name": detail.get("to_name") or detail.get("target_label"),
+        },
+        fallback_id=to_entity_id,
+    )
+    relation_type = (
+        detail.get("candidate_relation_type") or detail.get("relation_type") or "-"
+    )
+    confidence = detail.get("confidence_level") or "-"
+    order_count = detail.get("order_count") or 0
+    return (
+        f"{relationship_id} | {from_entity} -> {to_entity} | "
+        f"{relation_type} | {confidence} | {order_count} orders"
+    )
+
+
 def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 520) -> str:
     """Render a one-hop graph payload as standalone SVG HTML."""
 
@@ -197,6 +273,7 @@ def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 5
         return px, py
 
     edge_markup: list[str] = []
+    edge_label_markup: list[str] = []
     for edge in edges:
         source = edge.get("source")
         target = edge.get("target")
@@ -212,6 +289,23 @@ def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 5
             f"stroke='{style['color']}' stroke-width='{style['width']}'{dash}>"
             f"<title>{title}</title></line>"
         )
+        relation_label = html.escape(_short_edge_label(edge))
+        if relation_label:
+            label_width = min(max(len(relation_label) * 5.5 + 16, 54), 190)
+            label_height = 18
+            label_x = min(max(((x1 + x2) / 2) - (label_width / 2), 8), width - label_width - 8)
+            label_y = min(max(((y1 + y2) / 2) - (label_height / 2), 8), height - label_height - 8)
+            text_x = label_x + (label_width / 2)
+            text_y = label_y + 12
+            edge_label_markup.append(
+                f"<g><rect class='edge-label-bg' x='{label_x:.1f}' y='{label_y:.1f}' "
+                f"width='{label_width:.1f}' height='{label_height}' rx='7' "
+                "fill='#ffffff' fill-opacity='0.9' stroke='#cbd5e1' "
+                "stroke-width='0.8' />"
+                f"<text class='edge-label-text' x='{text_x:.1f}' y='{text_y:.1f}' "
+                "text-anchor='middle' font-size='9.5' font-weight='700' "
+                f"fill='{style['color']}'>{relation_label}</text></g>"
+            )
 
     node_by_id = {node["id"]: node for node in nodes}
     node_markup: list[str] = []
@@ -272,6 +366,7 @@ def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 5
         <rect x="0" y="0" width="{width}" height="{height}" rx="18"
               fill="url(#soft-grid)" opacity="0.45" />
         {"".join(edge_markup)}
+        {"".join(edge_label_markup)}
         {"".join(node_markup)}
         {empty_hint}
       </svg>
@@ -315,8 +410,11 @@ def graph_summary_counts(graph: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
 def format_candidate_edge_label(edge: dict[str, Any]) -> str:
     """Return a selectbox label for a candidate edge."""
 
+    source_label = _edge_endpoint_label(edge, "source_label", "source")
+    target_label = _edge_endpoint_label(edge, "target_label", "target")
     return (
-        f"{edge.get('id') or '-'} | {edge.get('relation_type') or '-'} | "
+        f"{edge.get('id') or '-'} | {source_label} -> {target_label} | "
+        f"{edge.get('relation_type') or '-'} | "
         f"{edge.get('confidence_level') or '-'} | {edge.get('order_count') or 0} orders"
     )
 
@@ -395,7 +493,14 @@ def render_graph_tab() -> None:
 
     components.html(render_graph_svg(graph), height=620, scrolling=True)
 
-    candidate_edges = get_candidate_edges(graph)
+    node_labels_by_id = {
+        str(node.get("id")): str(node.get("label") or node.get("id") or "-")
+        for node in nodes
+    }
+    candidate_edges = [
+        with_edge_display_names(edge, node_labels_by_id)
+        for edge in get_candidate_edges(graph)
+    ]
     if candidate_edges:
         st.markdown("**待审核候选关系**")
         candidate_ids = [edge["id"] for edge in candidate_edges]
@@ -411,6 +516,7 @@ def render_graph_tab() -> None:
             (edge for edge in candidate_edges if edge.get("id") == selected_claim_id),
             {},
         )
+        st.info(format_relationship_detail_summary(selected_edge))
         st.json(selected_edge)
         if st.button("带到人工审核 tab"):
             set_selected_claim_id(selected_claim_id)
@@ -441,6 +547,9 @@ def render_review_tab() -> None:
     if selected_claim_id and REVIEW_CLAIM_WIDGET_KEY not in st.session_state:
         st.session_state[REVIEW_CLAIM_WIDGET_KEY] = selected_claim_id
     claim_id = st.text_input("候选关系 ID", key=REVIEW_CLAIM_WIDGET_KEY)
+    if claim_id:
+        relationship_detail = get_relationship_detail(claim_id)
+        st.info(format_relationship_detail_summary(relationship_detail))
     action_type = st.selectbox("审核动作", ["confirm", "reject", "modify"])
     default_relation_type = (
         "rejected_relation" if action_type == "reject" else DEFAULT_RELATION_TYPE
@@ -468,6 +577,16 @@ def render_review_tab() -> None:
     st.subheader("人工新增关系")
     from_entity_id = st.text_input("起点企业 ID")
     to_entity_id = st.text_input("终点企业 ID")
+    if from_entity_id:
+        from_entity_label = format_entity_reference(
+            get_entity_detail(from_entity_id), fallback_id=from_entity_id
+        )
+        st.caption(f"起点企业：{from_entity_label}")
+    if to_entity_id:
+        to_entity_label = format_entity_reference(
+            get_entity_detail(to_entity_id), fallback_id=to_entity_id
+        )
+        st.caption(f"终点企业：{to_entity_label}")
     manual_relation_type = st.selectbox(
         "人工关系类型",
         RELATION_TYPE_OPTIONS,

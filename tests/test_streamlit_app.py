@@ -93,6 +93,10 @@ def test_graph_svg_renderer_outputs_candidate_and_curated_styles() -> None:
     assert "CLM_1" in svg
     assert "stroke-dasharray" in svg
     assert "待审核候选" in svg
+    assert "class='edge-label-bg'" in svg
+    assert "class='edge-label-text'" in svg
+    assert "trading_partner" in svg
+    assert "subsidiary_candidate" in svg
 
 
 def test_graph_svg_renderer_places_readable_backgrounds_behind_node_labels() -> None:
@@ -169,7 +173,27 @@ def test_candidate_edge_label_uses_fallbacks_for_partial_edges() -> None:
         {"id": "CLM_1", "edge_type": "relationship_claim"}
     )
 
-    assert label == "CLM_1 | - | - | 0 orders"
+    assert label == "CLM_1 | - -> - | - | - | 0 orders"
+
+
+def test_candidate_edge_label_includes_entity_names_for_review_context() -> None:
+    label = streamlit_app.format_candidate_edge_label(
+        {
+            "id": "CLM_1",
+            "edge_type": "relationship_claim",
+            "source_label": "ACME TRADING",
+            "target_label": "BETA FACTORY",
+            "relation_type": "trading_partner_candidate",
+            "confidence_level": "medium",
+            "order_count": 2,
+        }
+    )
+
+    assert (
+        label
+        == "CLM_1 | ACME TRADING -> BETA FACTORY | "
+        "trading_partner_candidate | medium | 2 orders"
+    )
 
 
 def test_graph_summary_counts_falls_back_to_payload_lengths() -> None:
@@ -278,3 +302,37 @@ def test_review_tab_uses_relation_type_selectboxes(monkeypatch) -> None:
         "关系类型": streamlit_app.RELATION_TYPE_OPTIONS,
         "人工关系类型": streamlit_app.RELATION_TYPE_OPTIONS,
     }
+
+
+def test_review_detail_summary_includes_entity_names() -> None:
+    summary = streamlit_app.format_relationship_detail_summary(
+        {
+            "claim_id": "CLM_1",
+            "record_type": "relationship_claim",
+            "from_entity_id": "ENT_A",
+            "from_name": "ACME TRADING",
+            "to_entity_id": "ENT_B",
+            "to_name": "BETA FACTORY",
+            "candidate_relation_type": "trading_partner_candidate",
+            "confidence_level": "medium",
+            "order_count": 2,
+        }
+    )
+
+    assert "CLM_1" in summary
+    assert "ACME TRADING (ENT_A) -> BETA FACTORY (ENT_B)" in summary
+    assert "trading_partner_candidate" in summary
+    assert "medium" in summary
+    assert "2 orders" in summary
+
+
+def test_entity_reference_summary_includes_name_when_available() -> None:
+    assert (
+        streamlit_app.format_entity_reference(
+            {"entity_id": "ENT_A", "canonical_name": "ACME TRADING"}
+        )
+        == "ACME TRADING (ENT_A)"
+    )
+    assert streamlit_app.format_entity_reference(None, fallback_id="ENT_MISSING") == (
+        "未找到企业：ENT_MISSING"
+    )

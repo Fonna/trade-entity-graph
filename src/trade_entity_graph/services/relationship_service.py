@@ -208,9 +208,12 @@ def get_relationship_detail(
     with get_connection(db_path) as connection:
         row = connection.execute(
             """
-            SELECT *, 'curated_relationship' AS record_type
-            FROM curated_relationship
-            WHERE relationship_id = ?
+            SELECT cr.*, e1.canonical_name AS from_name, e2.canonical_name AS to_name,
+                   'curated_relationship' AS record_type
+            FROM curated_relationship cr
+            JOIN entity e1 ON e1.entity_id = cr.from_entity_id
+            JOIN entity e2 ON e2.entity_id = cr.to_entity_id
+            WHERE cr.relationship_id = ?
             """,
             (relationship_id,),
         ).fetchone()
@@ -219,9 +222,12 @@ def get_relationship_detail(
 
         row = connection.execute(
             """
-            SELECT *, 'relationship_claim' AS record_type
-            FROM relationship_claim
-            WHERE claim_id = ?
+            SELECT rc.*, e1.canonical_name AS from_name, e2.canonical_name AS to_name,
+                   'relationship_claim' AS record_type
+            FROM relationship_claim rc
+            JOIN entity e1 ON e1.entity_id = rc.from_entity_id
+            JOIN entity e2 ON e2.entity_id = rc.to_entity_id
+            WHERE rc.claim_id = ?
             """,
             (relationship_id,),
         ).fetchone()

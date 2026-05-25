@@ -25,6 +25,8 @@ def _order_edge(row: Any) -> dict[str, Any]:
         "id": row["edge_id"],
         "source": row["from_entity_id"],
         "target": row["to_entity_id"],
+        "source_label": row["from_name"],
+        "target_label": row["to_name"],
         "edge_type": "order_role_edge",
         "record_type": "order_role_edge",
         "relation_type": row["role_pair_type"],
@@ -43,6 +45,8 @@ def _curated_edge(row: Any) -> dict[str, Any]:
         "id": row["relationship_id"],
         "source": row["from_entity_id"],
         "target": row["to_entity_id"],
+        "source_label": row["from_name"],
+        "target_label": row["to_name"],
         "edge_type": "curated_relationship",
         "record_type": "curated_relationship",
         "relation_type": row["relation_type"],
@@ -67,6 +71,8 @@ def _claim_edge(row: Any) -> dict[str, Any]:
         "id": row["claim_id"],
         "source": row["from_entity_id"],
         "target": row["to_entity_id"],
+        "source_label": row["from_name"],
+        "target_label": row["to_name"],
         "edge_type": "relationship_claim",
         "record_type": "relationship_claim",
         "relation_type": row["candidate_relation_type"],
@@ -92,31 +98,42 @@ def get_ego_graph(
     with get_connection(db_path) as connection:
         order_edges = connection.execute(
             """
-            SELECT * FROM order_role_edge
-            WHERE from_entity_id = ? OR to_entity_id = ?
-            ORDER BY order_id, role_pair_type
+            SELECT ore.*, e1.canonical_name AS from_name, e2.canonical_name AS to_name
+            FROM order_role_edge ore
+            JOIN entity e1 ON e1.entity_id = ore.from_entity_id
+            JOIN entity e2 ON e2.entity_id = ore.to_entity_id
+            WHERE ore.from_entity_id = ? OR ore.to_entity_id = ?
+            ORDER BY ore.order_id, ore.role_pair_type
             """,
             (center_entity_id, center_entity_id),
         ).fetchall()
         curated_sql = """
-            SELECT * FROM curated_relationship
-            WHERE from_entity_id = ? OR to_entity_id = ?
-            ORDER BY created_at
+            SELECT cr.*, e1.canonical_name AS from_name, e2.canonical_name AS to_name
+            FROM curated_relationship cr
+            JOIN entity e1 ON e1.entity_id = cr.from_entity_id
+            JOIN entity e2 ON e2.entity_id = cr.to_entity_id
+            WHERE cr.from_entity_id = ? OR cr.to_entity_id = ?
+            ORDER BY cr.created_at
         """
         curated_params = (center_entity_id, center_entity_id)
         if not include_rejected:
             curated_sql = """
-                SELECT * FROM curated_relationship
-                WHERE (from_entity_id = ? OR to_entity_id = ?)
-                  AND relation_status != 'rejected'
-                ORDER BY created_at
+                SELECT cr.*, e1.canonical_name AS from_name, e2.canonical_name AS to_name
+                FROM curated_relationship cr
+                JOIN entity e1 ON e1.entity_id = cr.from_entity_id
+                JOIN entity e2 ON e2.entity_id = cr.to_entity_id
+                WHERE (cr.from_entity_id = ? OR cr.to_entity_id = ?)
+                  AND cr.relation_status != 'rejected'
+                ORDER BY cr.created_at
             """
         curated_edges = connection.execute(curated_sql, curated_params).fetchall()
         pending_status_placeholders = ", ".join("?" for _ in PENDING_CLAIM_STATUSES)
         claim_edges = connection.execute(
             f"""
-            SELECT *
+            SELECT rc.*, e1.canonical_name AS from_name, e2.canonical_name AS to_name
             FROM relationship_claim rc
+            JOIN entity e1 ON e1.entity_id = rc.from_entity_id
+            JOIN entity e2 ON e2.entity_id = rc.to_entity_id
             WHERE (rc.from_entity_id = ? OR rc.to_entity_id = ?)
               AND rc.relation_status IN ({pending_status_placeholders})
               AND NOT EXISTS (

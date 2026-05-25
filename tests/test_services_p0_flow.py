@@ -9,6 +9,7 @@ from trade_entity_graph.services.graph_service import get_ego_graph
 from trade_entity_graph.services.relationship_service import (
     aggregate_relationship_claims,
     generate_order_role_edges,
+    get_relationship_detail,
 )
 from trade_entity_graph.services.review_service import (
     create_manual_relationship,
@@ -164,7 +165,15 @@ def test_ego_graph_includes_pending_claims_and_hides_reviewed_claims(tmp_path) -
     assert beta_claim_edge["confidence_score"] == 0.55
     assert beta_claim_edge["order_count"] == 2
     assert beta_claim_edge["total_teu"] == 7.5
+    assert beta_claim_edge["source_label"] == "ACME TRADING"
+    assert beta_claim_edge["target_label"] == "BETA FACTORY"
     assert "2 orders" in beta_claim_edge["label"]
+
+    beta_claim_detail = get_relationship_detail(beta_claim_id, db_path=db_path)
+
+    assert beta_claim_detail is not None
+    assert beta_claim_detail["from_name"] == "ACME TRADING"
+    assert beta_claim_detail["to_name"] == "BETA FACTORY"
 
     reviewed = decide_relationship(
         beta_claim_id,
