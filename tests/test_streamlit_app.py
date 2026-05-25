@@ -111,6 +111,58 @@ def test_candidate_edges_returns_pending_relationship_claim_edges() -> None:
     ]
 
 
+def test_candidate_edges_skips_claim_edges_without_usable_id() -> None:
+    graph = {
+        "edges": [
+            {"id": "CLM_1", "edge_type": "relationship_claim"},
+            {"edge_type": "relationship_claim"},
+            {"id": "", "edge_type": "relationship_claim"},
+            {"id": None, "edge_type": "relationship_claim"},
+        ]
+    }
+
+    assert streamlit_app.get_candidate_edges(graph) == [
+        {"id": "CLM_1", "edge_type": "relationship_claim"},
+    ]
+
+
+def test_candidate_edge_label_uses_fallbacks_for_partial_edges() -> None:
+    label = streamlit_app.format_candidate_edge_label(
+        {"id": "CLM_1", "edge_type": "relationship_claim"}
+    )
+
+    assert label == "CLM_1 | - | - | 0 orders"
+
+
+def test_graph_summary_counts_falls_back_to_payload_lengths() -> None:
+    graph = {
+        "nodes": [{"id": "ENT_1"}, {"id": "ENT_2"}],
+        "edges": [
+            {"id": "CLM_1", "edge_type": "relationship_claim"},
+            {"edge_type": "relationship_claim"},
+            {"id": "REL_1", "edge_type": "curated_relationship"},
+            {"id": "ORD_1", "edge_type": "order_role"},
+        ],
+    }
+
+    assert streamlit_app.graph_summary_counts(graph) == (2, 4, 1, 1)
+
+
+def test_graph_summary_counts_prefers_summary_values() -> None:
+    graph = {
+        "nodes": [{"id": "ENT_1"}],
+        "edges": [{"id": "CLM_1", "edge_type": "relationship_claim"}],
+        "summary": {
+            "node_count": 10,
+            "edge_count": 20,
+            "candidate_edge_count": 30,
+            "curated_edge_count": 40,
+        },
+    }
+
+    assert streamlit_app.graph_summary_counts(graph) == (10, 20, 30, 40)
+
+
 def test_selected_claim_state_helpers_round_trip() -> None:
     state: dict[str, str] = {}
 

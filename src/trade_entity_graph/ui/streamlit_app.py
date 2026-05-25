@@ -223,9 +223,36 @@ def get_candidate_edges(graph: dict[str, Any]) -> list[dict[str, Any]]:
 
     return [
         edge
-        for edge in graph.get("edges", [])
-        if edge.get("edge_type") == "relationship_claim"
+        for edge in graph.get("edges", []) or []
+        if edge.get("edge_type") == "relationship_claim" and edge.get("id")
     ]
+
+
+def graph_summary_counts(graph: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
+    """Return graph summary counts, falling back to payload lengths."""
+
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    summary = graph.get("summary") or {}
+    candidate_edge_count = len(get_candidate_edges(graph))
+    curated_edge_count = len(
+        [edge for edge in edges if edge.get("edge_type") == "curated_relationship"]
+    )
+    return (
+        summary.get("node_count", len(nodes)),
+        summary.get("edge_count", len(edges)),
+        summary.get("candidate_edge_count", candidate_edge_count),
+        summary.get("curated_edge_count", curated_edge_count),
+    )
+
+
+def format_candidate_edge_label(edge: dict[str, Any]) -> str:
+    """Return a selectbox label for a candidate edge."""
+
+    return (
+        f"{edge.get('id') or '-'} | {edge.get('relation_type') or '-'} | "
+        f"{edge.get('confidence_level') or '-'} | {edge.get('order_count') or 0} orders"
+    )
 
 
 def render_intro() -> None:
@@ -289,33 +316,35 @@ def render_graph_tab() -> None:
         return
 
     graph = get_ego_graph(center_entity_id, include_rejected=include_rejected)
-    summary = graph["summary"]
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    node_count, edge_count, candidate_edge_count, curated_edge_count = graph_summary_counts(
+        graph
+    )
     metric_cols = st.columns(4)
-    metric_cols[0].metric("节点数", summary["node_count"])
-    metric_cols[1].metric("边数", summary["edge_count"])
-    metric_cols[2].metric("待审核候选", summary.get("candidate_edge_count", 0))
-    metric_cols[3].metric("最终关系", summary.get("curated_edge_count", 0))
+    metric_cols[0].metric("节点数", node_count)
+    metric_cols[1].metric("边数", edge_count)
+    metric_cols[2].metric("待审核候选", candidate_edge_count)
+    metric_cols[3].metric("最终关系", curated_edge_count)
 
     components.html(render_graph_svg(graph), height=620, scrolling=True)
 
     candidate_edges = get_candidate_edges(graph)
     if candidate_edges:
         st.markdown("**待审核候选关系**")
+        candidate_ids = [edge["id"] for edge in candidate_edges]
+        label_by_id = {
+            edge["id"]: format_candidate_edge_label(edge) for edge in candidate_edges
+        }
         selected_claim_id = st.selectbox(
             "选择要带到人工审核 tab 的候选关系",
-            [edge["id"] for edge in candidate_edges],
-            format_func=lambda claim_id: next(
-                (
-                    f"{edge['id']} | {edge['relation_type']} | "
-                    f"{edge.get('confidence_level') or '-'} | "
-                    f"{edge.get('order_count') or 0} orders"
-                    for edge in candidate_edges
-                    if edge["id"] == claim_id
-                ),
-                claim_id,
-            ),
+            candidate_ids,
+            format_func=lambda claim_id: label_by_id.get(claim_id, claim_id),
         )
-        selected_edge = next(edge for edge in candidate_edges if edge["id"] == selected_claim_id)
+        selected_edge = next(
+            (edge for edge in candidate_edges if edge.get("id") == selected_claim_id),
+            {},
+        )
         st.json(selected_edge)
         if st.button("带到人工审核 tab"):
             set_selected_claim_id(selected_claim_id)
@@ -324,8 +353,9 @@ def render_graph_tab() -> None:
         st.info("当前中心企业暂无待审核候选关系。")
 
     with st.expander("节点与边数据"):
-        st.dataframe(graph["nodes"])
-        st.dataframe(graph["edges"])
+        st.dataframe(nodes)
+        st.dataframe(edges)
+
 
 def render_relationship_detail_tab() -> None:
     """Render relationship details and evidence."""
