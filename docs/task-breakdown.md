@@ -146,7 +146,7 @@ MVP 第一版只承诺 P0 闭环：
 
 ## 11. 当前实现状态
 
-截至 2026-05-22，仓库已完成 M2-M7 P0 的服务层优先实现，并已推送到 `origin/main`：
+截至 2026-05-25，仓库已完成 M2-M8 P0 的服务层优先实现和演示验收数据包：
 
 - M2：支持 Excel/CSV 导入，生成 `import_batch`、`import_source_file`、`entity`、`entity_alias`、`order_evidence`，并可导入已有 `relationship_claim`；导入时会复制原始文件到 `data/raw/imports/<run_id>/`。
 - M3：支持生成 `customer_to_shipper`、`customer_to_consignee`、`customer_to_notify`、`shipper_to_consignee` 四类 P0 订单角色边。
@@ -154,6 +154,7 @@ MVP 第一版只承诺 P0 闭环：
 - M5：支持实体搜索、实体详情、一跳图谱、关系详情、关系证据、审核写回和导出服务。
 - M6：支持 P0 FastAPI endpoint，包括导入、搜索、详情、图谱、关系详情、审核和导出；`/imports/run` 返回本次导入的 `archived_files`。
 - M7：支持中文 Streamlit MVP 工作台 tabs：数据导入、企业搜索、关系图谱、关系详情、人工审核、导出；顶部包含基础逻辑与使用方法说明。
+- M8：新增可重复生成的演示数据包和预置审核脚本；演示数据约 50 个主体、80+ 条订单，保留待审核候选关系，并覆盖主要最终关系类型。
 
 验证命令：
 
@@ -162,4 +163,4 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-当前通过标准：全量测试 14 passed，ruff 0 errors。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
+当前通过标准：全量测试 14 passed，M8 专项测试 3 passed，ruff 0 errors。最终验收勾选会在全量验证完成后更新。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。

@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## 快速开始
 
-当前仓库已完成 M0/M1 基线，并具备 M2-M7 P0 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳图谱查询、FastAPI 接口、中文 Streamlit 工作台和导出能力。
+当前仓库已完成 M0/M1 基线，并具备 M2-M8 P0 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳图谱查询、FastAPI 接口、中文 Streamlit 工作台、导出能力和演示验收数据包。
 
 本项目所有 Python 环境、依赖安装和命令运行统一使用 `uv`，避免污染全局 Python 环境。
 
@@ -84,6 +84,19 @@ uv run python scripts\run_api.py
 ```powershell
 uv run python scripts\run_ui.py
 ```
+
+### M8 演示数据与验收
+
+生成并导入约 50 个主体、80+ 条订单和覆盖多种关系类型的演示数据：
+
+```powershell
+uv --cache-dir .uv-cache run python scripts\generate_demo_data.py
+uv --cache-dir .uv-cache run python scripts\init_db.py
+uv --cache-dir .uv-cache run python scripts\import_demo_data.py
+uv --cache-dir .uv-cache run python scripts\seed_demo_reviews.py
+```
+
+演示数据位于 `data/demo/`。导入后，系统会保留一批待审核候选关系，并预置覆盖 `same_group`、`subsidiary`、`factory_node`、`sales_center`、`trading_partner`、`logistics_service` 和 `rejected_relation` 的已审核关系。
 
 运行基础测试：
 
@@ -143,7 +156,7 @@ flowchart TD
 
 ## 当前开发状态
 
-截至 2026-05-22，`origin/main` 已包含 M2-M7 P0 闭环和原始文件归档能力。最近一次验证：
+截至 2026-05-25，当前分支已包含 M2-M8 P0 闭环、原始文件归档能力和演示验收数据包。最近一次验证：
 
 ```powershell
 uv --cache-dir .uv-cache run pytest

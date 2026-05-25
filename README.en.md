@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## Quick Start
 
-The repository has completed the M0/M1 baseline and now includes the M2-M7 P0 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop graph query, FastAPI endpoints, Chinese Streamlit workbench, and export support.
+The repository has completed the M0/M1 baseline and now includes the M2-M8 P0 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop graph query, FastAPI endpoints, Chinese Streamlit workbench, export support, and demo acceptance data.
 
 All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
 
@@ -84,6 +84,19 @@ Start the Streamlit prototype:
 ```powershell
 uv run python scripts\run_ui.py
 ```
+
+### M8 Demo Data and Acceptance
+
+Generate and import demo data with about 50 entities, 80+ orders, and broad relationship coverage:
+
+```powershell
+uv --cache-dir .uv-cache run python scripts\generate_demo_data.py
+uv --cache-dir .uv-cache run python scripts\init_db.py
+uv --cache-dir .uv-cache run python scripts\import_demo_data.py
+uv --cache-dir .uv-cache run python scripts\seed_demo_reviews.py
+```
+
+The demo files live under `data/demo/`. After import, the system keeps pending candidates for manual review and pre-seeds reviewed relationships covering `same_group`, `subsidiary`, `factory_node`, `sales_center`, `trading_partner`, `logistics_service`, and `rejected_relation`.
 
 Run smoke tests:
 
@@ -143,7 +156,7 @@ flowchart TD
 
 ## Current Development Status
 
-As of 2026-05-22, `origin/main` includes the M2-M7 P0 loop and source-file archiving. Latest verification:
+As of 2026-05-25, the current branch includes the M2-M8 P0 loop, source-file archiving, and demo acceptance data. Latest verification:
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
