@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pandas as pd
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
 
 from scripts.generate_demo_data import write_demo_data
 from scripts.import_demo_data import import_demo_data
@@ -156,9 +152,9 @@ def test_demo_acceptance_flow_imports_reviews_graphs_and_exports(tmp_path, monke
     seed_result = seed_demo_reviews(db_path=db_path)
 
     with get_connection(db_path) as connection:
-        curated_count = connection.execute(
-            "SELECT COUNT(*) FROM curated_relationship"
-        ).fetchone()[0]
+        curated_count = connection.execute("SELECT COUNT(*) FROM curated_relationship").fetchone()[
+            0
+        ]
         decision_count = connection.execute(
             "SELECT COUNT(*) FROM relationship_decision"
         ).fetchone()[0]
