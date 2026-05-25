@@ -11,6 +11,7 @@ from trade_entity_graph.db.connection import get_connection
 from trade_entity_graph.services.export_service import export_relationship_rows
 from trade_entity_graph.services.graph_service import get_ego_graph
 from trade_entity_graph.services.relationship_service import get_relationship_evidence
+from trade_entity_graph.services.review_service import decide_relationship
 
 
 def test_generate_demo_data_writes_importable_files(tmp_path) -> None:
@@ -228,3 +229,65 @@ def test_demo_acceptance_flow_imports_reviews_graphs_and_exports(tmp_path, monke
 
     second_seed = seed_demo_reviews(db_path=db_path)
     assert second_seed["skipped"] is True
+
+
+def test_demo_pending_candidate_is_visible_then_hidden_after_review(
+    tmp_path, monkeypatch
+) -> None:
+    output_dir = tmp_path / "demo"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+    write_demo_data(output_dir)
+    import_demo_data(output_dir=output_dir, db_path=db_path)
+    seed_demo_reviews(db_path=db_path)
+
+    with get_connection(db_path) as connection:
+        pending_claim = connection.execute(
+            """
+            SELECT *
+            FROM relationship_claim rc
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM curated_relationship cr
+                WHERE cr.decision_source = rc.claim_id
+            )
+            ORDER BY rc.confidence_score DESC, rc.order_count DESC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    assert pending_claim is not None
+    center_id = pending_claim["from_entity_id"]
+    claim_id = pending_claim["claim_id"]
+
+    graph = get_ego_graph(center_id, db_path=db_path)
+    pending_graph_claims = {
+        edge["id"]
+        for edge in graph["edges"]
+        if edge["edge_type"] == "relationship_claim"
+    }
+
+    assert claim_id in pending_graph_claims
+
+    reviewed = decide_relationship(
+        claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Demo candidate confirmed from graph",
+        operator="tester",
+        db_path=db_path,
+    )
+    graph_after_review = get_ego_graph(center_id, db_path=db_path)
+    pending_after_review = {
+        edge["id"]
+        for edge in graph_after_review["edges"]
+        if edge["edge_type"] == "relationship_claim"
+    }
+    curated_after_review = {
+        edge["id"]
+        for edge in graph_after_review["edges"]
+        if edge["edge_type"] == "curated_relationship"
+    }
+
+    assert claim_id not in pending_after_review
+    assert reviewed["relationship_id"] in curated_after_review
