@@ -8,6 +8,7 @@ from typing import Any, MutableMapping, TypedDict
 
 import networkx as nx
 import streamlit as st
+import streamlit.components.v1 as components
 
 from trade_entity_graph.importers.models import ImportInputs
 from trade_entity_graph.importers.pipeline import run_import
@@ -217,6 +218,16 @@ def render_graph_svg(graph: dict[str, Any], *, width: int = 900, height: int = 5
     """
 
 
+def get_candidate_edges(graph: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return pending relationship claim edges from a graph payload."""
+
+    return [
+        edge
+        for edge in graph.get("edges", [])
+        if edge.get("edge_type") == "relationship_claim"
+    ]
+
+
 def render_intro() -> None:
     """Render concise product guidance above the main workflow tabs."""
 
@@ -268,18 +279,53 @@ def render_search_tab() -> None:
 
 
 def render_graph_tab() -> None:
-    """Render one-hop graph JSON."""
+    """Render one-hop graph visualization and candidate handoff."""
 
     st.subheader("一跳关系图谱")
     center_entity_id = st.text_input("中心企业 ID")
     include_rejected = st.checkbox("包含已否定的人工关系")
-    if center_entity_id:
-        graph = get_ego_graph(center_entity_id, include_rejected=include_rejected)
-        st.metric("节点数", graph["summary"]["node_count"])
-        st.metric("边数", graph["summary"]["edge_count"])
+    if not center_entity_id:
+        st.info("请输入中心企业 ID 后查看一跳关系图谱。")
+        return
+
+    graph = get_ego_graph(center_entity_id, include_rejected=include_rejected)
+    summary = graph["summary"]
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("节点数", summary["node_count"])
+    metric_cols[1].metric("边数", summary["edge_count"])
+    metric_cols[2].metric("待审核候选", summary.get("candidate_edge_count", 0))
+    metric_cols[3].metric("最终关系", summary.get("curated_edge_count", 0))
+
+    components.html(render_graph_svg(graph), height=620, scrolling=True)
+
+    candidate_edges = get_candidate_edges(graph)
+    if candidate_edges:
+        st.markdown("**待审核候选关系**")
+        selected_claim_id = st.selectbox(
+            "选择要带到人工审核 tab 的候选关系",
+            [edge["id"] for edge in candidate_edges],
+            format_func=lambda claim_id: next(
+                (
+                    f"{edge['id']} | {edge['relation_type']} | "
+                    f"{edge.get('confidence_level') or '-'} | "
+                    f"{edge.get('order_count') or 0} orders"
+                    for edge in candidate_edges
+                    if edge["id"] == claim_id
+                ),
+                claim_id,
+            ),
+        )
+        selected_edge = next(edge for edge in candidate_edges if edge["id"] == selected_claim_id)
+        st.json(selected_edge)
+        if st.button("带到人工审核 tab"):
+            set_selected_claim_id(selected_claim_id)
+            st.success(f"已选择候选关系 {selected_claim_id}，请切换到人工审核 tab 继续处理。")
+    else:
+        st.info("当前中心企业暂无待审核候选关系。")
+
+    with st.expander("节点与边数据"):
         st.dataframe(graph["nodes"])
         st.dataframe(graph["edges"])
-
 
 def render_relationship_detail_tab() -> None:
     """Render relationship details and evidence."""
@@ -295,7 +341,10 @@ def render_review_tab() -> None:
     """Render manual review actions."""
 
     st.subheader("人工审核")
-    claim_id = st.text_input("候选关系 ID")
+    selected_claim_id = get_selected_claim_id()
+    if selected_claim_id and REVIEW_CLAIM_WIDGET_KEY not in st.session_state:
+        st.session_state[REVIEW_CLAIM_WIDGET_KEY] = selected_claim_id
+    claim_id = st.text_input("候选关系 ID", key=REVIEW_CLAIM_WIDGET_KEY)
     action_type = st.selectbox("审核动作", ["confirm", "reject", "modify"])
     relation_type = st.text_input("关系类型", value="trading_partner")
     reason = st.text_area("判断理由")

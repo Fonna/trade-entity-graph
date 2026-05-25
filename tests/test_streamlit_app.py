@@ -10,6 +10,10 @@ def test_streamlit_app_exposes_mvp_tab_renderers() -> None:
     assert callable(streamlit_app.render_relationship_detail_tab)
     assert callable(streamlit_app.render_review_tab)
     assert callable(streamlit_app.render_export_tab)
+    assert callable(streamlit_app.render_graph_svg)
+    assert callable(streamlit_app.get_candidate_edges)
+    assert callable(streamlit_app.get_selected_claim_id)
+    assert callable(streamlit_app.set_selected_claim_id)
 
 
 def test_streamlit_app_uses_chinese_tab_labels() -> None:
@@ -91,6 +95,22 @@ def test_graph_svg_renderer_outputs_candidate_and_curated_styles() -> None:
     assert "待审核候选" in svg
 
 
+def test_candidate_edges_returns_pending_relationship_claim_edges() -> None:
+    graph = {
+        "edges": [
+            {"id": "CLM_1", "edge_type": "relationship_claim"},
+            {"id": "REL_1", "edge_type": "curated_relationship"},
+            {"id": "ORD_1", "edge_type": "order_role"},
+            {"id": "CLM_2", "edge_type": "relationship_claim"},
+        ]
+    }
+
+    assert streamlit_app.get_candidate_edges(graph) == [
+        {"id": "CLM_1", "edge_type": "relationship_claim"},
+        {"id": "CLM_2", "edge_type": "relationship_claim"},
+    ]
+
+
 def test_selected_claim_state_helpers_round_trip() -> None:
     state: dict[str, str] = {}
 
@@ -100,3 +120,11 @@ def test_selected_claim_state_helpers_round_trip() -> None:
     assert state["selected_claim_id"] == "CLM_123"
     assert state["review_claim_id"] == "CLM_123"
     assert streamlit_app.get_selected_claim_id(state=state) == "CLM_123"
+
+
+def test_streamlit_app_exposes_graph_handoff_helpers() -> None:
+    assert callable(streamlit_app.render_graph_svg)
+    assert callable(streamlit_app.get_selected_claim_id)
+    assert callable(streamlit_app.set_selected_claim_id)
+    assert streamlit_app.SELECTED_CLAIM_STATE_KEY == "selected_claim_id"
+    assert streamlit_app.REVIEW_CLAIM_WIDGET_KEY == "review_claim_id"
