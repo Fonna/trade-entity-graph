@@ -141,3 +141,51 @@ def test_entity_search_detail_graph_review_and_export_p0_flow(tmp_path) -> None:
 
     assert decision_count == 4
     assert audit_count == 4
+
+
+def test_ego_graph_includes_pending_claims_and_hides_reviewed_claims(tmp_path) -> None:
+    db_path = _seed_p0_flow(tmp_path)
+    acme_id = _entity_id(db_path, "ACME TRADING")
+    beta_claim_id = _claim_id(db_path, "ACME TRADING", "BETA FACTORY")
+
+    graph = get_ego_graph(acme_id, db_path=db_path)
+
+    pending_claim_edges = [
+        edge for edge in graph["edges"] if edge["edge_type"] == "relationship_claim"
+    ]
+    pending_claim_ids = {edge["id"] for edge in pending_claim_edges}
+
+    assert beta_claim_id in pending_claim_ids
+    beta_claim_edge = next(edge for edge in pending_claim_edges if edge["id"] == beta_claim_id)
+    assert beta_claim_edge["record_type"] == "relationship_claim"
+    assert beta_claim_edge["relation_type"] == "trading_partner_candidate"
+    assert beta_claim_edge["status"] == "candidate"
+    assert beta_claim_edge["confidence_level"] == "medium"
+    assert beta_claim_edge["confidence_score"] == 0.55
+    assert beta_claim_edge["order_count"] == 2
+    assert beta_claim_edge["total_teu"] == 7.5
+    assert "2 orders" in beta_claim_edge["label"]
+
+    reviewed = decide_relationship(
+        beta_claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Confirmed by graph review",
+        operator="tester",
+        db_path=db_path,
+    )
+    reviewed_graph = get_ego_graph(acme_id, db_path=db_path)
+
+    reviewed_pending_ids = {
+        edge["id"]
+        for edge in reviewed_graph["edges"]
+        if edge["edge_type"] == "relationship_claim"
+    }
+    curated_ids = {
+        edge["id"]
+        for edge in reviewed_graph["edges"]
+        if edge["edge_type"] == "curated_relationship"
+    }
+
+    assert beta_claim_id not in reviewed_pending_ids
+    assert reviewed["relationship_id"] in curated_ids
