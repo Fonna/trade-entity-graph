@@ -40,3 +40,6 @@ Thumbs.db
 
 # Local isolated worktrees
 .worktrees/
+
+# Local Superpowers brainstorming mockups
+.superpowers/
