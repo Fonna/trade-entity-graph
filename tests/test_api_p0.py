@@ -4,6 +4,8 @@ from urllib.parse import urlencode
 
 import pandas as pd
 
+from trade_entity_graph.db.connection import get_connection, initialize_database
+
 
 def _request(app, method: str, path: str, *, query=None, json_body=None):
     async def _call():
@@ -95,6 +97,11 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
     assert status == 200
     assert import_payload["edge_count"] == 7
     assert import_payload["claim_count"] == 3
+    assert import_payload["history_reuse"] == {
+        "history_matched": 0,
+        "history_conflict": 0,
+        "unchanged": 3,
+    }
     assert len(import_payload["archived_files"]) == 2
     assert {item["source_role"] for item in import_payload["archived_files"]} == {
         "entities",
@@ -120,6 +127,9 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
     status, relationship_payload = _request(app, "GET", f"/relationships/{claim_id}")
     assert status == 200
     assert relationship_payload["record_type"] == "relationship_claim"
+    assert relationship_payload["from_name"] == "ACME TRADING"
+    assert relationship_payload["to_name"]
+    assert "history_context" in relationship_payload
 
     status, decision_payload = _request(
         app,
@@ -147,3 +157,142 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
     )
     assert status == 200
     assert export_payload["rows"][0]["relationship_id"] == relationship_id
+
+
+def test_relationship_api_returns_history_context_and_keeps_history(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-history.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_HISTORY', 'api-history.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_API_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_API_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id, from_entity_id, to_entity_id, relation_type,
+                relation_status, source_type, decision_note, verified_by, verified_at
+            )
+            VALUES (
+                'REL_HISTORY', 'ENT_API_FROM', 'ENT_API_TO', 'trading_partner',
+                'rejected', 'manual', 'Historical rejection', 'reviewer',
+                CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_CONFLICT', 'ENT_API_FROM', 'ENT_API_TO',
+                'trading_partner_candidate', 'history_conflict', 'high', 0.88,
+                5, 21.5, '5 orders, 21.5 TEU', 'RUN_API_HISTORY'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, relationship_payload = _request(app, "GET", "/relationships/CLM_CONFLICT")
+    assert status == 200
+    assert relationship_payload["from_name"] == "ACME TRADING"
+    assert relationship_payload["to_name"] == "BETA FACTORY"
+    assert relationship_payload["history_context"]["history_relationship"][
+        "relationship_id"
+    ] == "REL_HISTORY"
+
+    status, decision_payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_CONFLICT/decision",
+        json_body={
+            "action_type": "keep_history",
+            "reason": "Keep reviewed history",
+            "operator": "tester",
+        },
+    )
+    assert status == 200
+    assert decision_payload["relation_status"] == "history_matched"
+
+
+def test_relationship_api_supersede_history_requires_relation_type(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-supersede-validation.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_SUPERSEDE', 'api-supersede.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_SUP_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_SUP_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_NEEDS_TYPE', 'ENT_SUP_FROM', 'ENT_SUP_TO',
+                'trading_partner_candidate', 'history_conflict', 'high', 0.88,
+                5, 21.5, '5 orders, 21.5 TEU', 'RUN_API_SUPERSEDE'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_NEEDS_TYPE/decision",
+        json_body={
+            "action_type": "supersede_history",
+            "reason": "Missing relation type",
+            "operator": "tester",
+        },
+    )
+    assert status == 422
+    assert payload["detail"]

@@ -12,6 +12,9 @@ from trade_entity_graph.services.relationship_service import (
 from trade_entity_graph.services.review_service import (
     create_manual_relationship,
     decide_relationship,
+    keep_history_for_claim,
+    mark_claim_pending_verify,
+    supersede_history_with_claim,
 )
 
 router = APIRouter(prefix="/relationships", tags=["relationships"])
@@ -19,7 +22,8 @@ router = APIRouter(prefix="/relationships", tags=["relationships"])
 
 class DecisionRequest(BaseModel):
     action_type: str
-    relation_type: str
+    relation_type: str | None = None
+    old_relationship_id: str | None = None
     reason: str
     operator: str
 
@@ -49,6 +53,31 @@ def get_relationship_evidence_endpoint(relationship_id: str) -> list[dict[str, o
 def decide_relationship_endpoint(
     relationship_id: str, request: DecisionRequest
 ) -> dict[str, object]:
+    if request.action_type == "keep_history":
+        return keep_history_for_claim(
+            relationship_id,
+            reason=request.reason,
+            operator=request.operator,
+        )
+    if request.action_type == "mark_pending_verify":
+        return mark_claim_pending_verify(
+            relationship_id,
+            reason=request.reason,
+            operator=request.operator,
+        )
+    if request.action_type == "supersede_history":
+        if request.relation_type is None:
+            raise HTTPException(status_code=422, detail="relation_type is required")
+        return supersede_history_with_claim(
+            relationship_id,
+            old_relationship_id=request.old_relationship_id,
+            relation_type=request.relation_type,
+            reason=request.reason,
+            operator=request.operator,
+        )
+
+    if request.relation_type is None:
+        raise HTTPException(status_code=422, detail="relation_type is required")
     return decide_relationship(
         relationship_id,
         action_type=request.action_type,

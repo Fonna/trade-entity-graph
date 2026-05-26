@@ -8,6 +8,7 @@ from typing import Any
 
 from trade_entity_graph.db.connection import get_connection
 from trade_entity_graph.importers.entity_loader import find_entity_id_by_name
+from trade_entity_graph.services.history_reuse_service import get_history_context_for_claim
 from trade_entity_graph.utils.ids import new_id
 from trade_entity_graph.utils.normalization import normalize_company_name
 
@@ -218,7 +219,9 @@ def get_relationship_detail(
             (relationship_id,),
         ).fetchone()
         if row:
-            return dict(row)
+            detail = dict(row)
+            detail["history_context"] = None
+            return detail
 
         row = connection.execute(
             """
@@ -231,7 +234,13 @@ def get_relationship_detail(
             """,
             (relationship_id,),
         ).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        detail = dict(row)
+        detail["history_context"] = get_history_context_for_claim(
+            relationship_id, db_path=db_path
+        )
+        return detail
 
 
 def get_relationship_evidence(
