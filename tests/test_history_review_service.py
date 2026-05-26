@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from trade_entity_graph.db.connection import get_connection, initialize_database
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
 from trade_entity_graph.services.review_service import (
@@ -44,6 +46,29 @@ def _insert_rejected_history(connection, from_entity_id: str, to_entity_id: str)
                 'Historical rejection', 'reviewer', CURRENT_TIMESTAMP)
         """,
         (relationship_id, from_entity_id, to_entity_id),
+    )
+    return relationship_id
+
+
+def _insert_history(
+    connection,
+    from_entity_id: str,
+    to_entity_id: str,
+    *,
+    relation_status: str,
+    valid_to: str | None = None,
+) -> str:
+    relationship_id = new_id("REL")
+    connection.execute(
+        """
+        INSERT INTO curated_relationship (
+            relationship_id, from_entity_id, to_entity_id, relation_type,
+            relation_status, source_type, decision_note, verified_by, verified_at, valid_to
+        )
+        VALUES (?, ?, ?, 'trading_partner', ?, 'manual',
+                'Historical relationship', 'reviewer', CURRENT_TIMESTAMP, ?)
+        """,
+        (relationship_id, from_entity_id, to_entity_id, relation_status, valid_to),
     )
     return relationship_id
 
@@ -231,3 +256,106 @@ def test_mark_claim_pending_verify_leaves_history_unchanged(tmp_path) -> None:
     assert claim == {"relation_status": "pending_verify"}
     assert old_relationship == {"relation_status": "rejected", "valid_to": None}
     assert [decision["action_type"] for decision in decisions] == ["mark_pending_verify"]
+
+
+def test_supersede_history_with_claim_rejects_unrelated_old_relationship(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, _history_id = _seed_history_conflict(db_path)
+    with get_connection(db_path) as connection:
+        gamma = _insert_entity(connection, "GAMMA EXPORTS")
+        delta = _insert_entity(connection, "DELTA BUYER")
+        unrelated_id = _insert_history(
+            connection,
+            gamma,
+            delta,
+            relation_status="rejected",
+        )
+        connection.commit()
+
+    with pytest.raises(ValueError):
+        supersede_history_with_claim(
+            claim_id,
+            old_relationship_id=unrelated_id,
+            relation_type="factory_node",
+            reason="Wrong relationship should not be touched",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    unrelated = _fetch_one(
+        db_path,
+        """
+        SELECT relation_status, valid_to
+        FROM curated_relationship
+        WHERE relationship_id = ?
+        """,
+        (unrelated_id,),
+    )
+    relationship_count = _fetch_one(
+        db_path,
+        "SELECT COUNT(*) AS count FROM curated_relationship",
+    )
+
+    assert unrelated == {"relation_status": "rejected", "valid_to": None}
+    assert relationship_count == {"count": 2}
+
+
+def test_supersede_history_with_claim_rejects_deprecated_old_relationship(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, _history_id = _seed_history_conflict(db_path)
+    with get_connection(db_path) as connection:
+        claim = connection.execute(
+            "SELECT from_entity_id, to_entity_id FROM relationship_claim WHERE claim_id = ?",
+            (claim_id,),
+        ).fetchone()
+        deprecated_id = _insert_history(
+            connection,
+            claim["from_entity_id"],
+            claim["to_entity_id"],
+            relation_status="deprecated",
+            valid_to="2026-05-01 00:00:00",
+        )
+        connection.commit()
+
+    with pytest.raises(ValueError):
+        supersede_history_with_claim(
+            claim_id,
+            old_relationship_id=deprecated_id,
+            relation_type="factory_node",
+            reason="Deprecated relationship should not be touched",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    deprecated = _fetch_one(
+        db_path,
+        """
+        SELECT relation_status, valid_to
+        FROM curated_relationship
+        WHERE relationship_id = ?
+        """,
+        (deprecated_id,),
+    )
+    relationship_count = _fetch_one(
+        db_path,
+        "SELECT COUNT(*) AS count FROM curated_relationship",
+    )
+
+    assert deprecated == {
+        "relation_status": "deprecated",
+        "valid_to": "2026-05-01 00:00:00",
+    }
+    assert relationship_count == {"count": 2}
+
+
+def test_keep_history_for_claim_unknown_claim_raises_unknown_claim_error(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    initialize_database(db_path)
+
+    with pytest.raises(ValueError, match="Unknown relationship claim"):
+        keep_history_for_claim(
+            "CLM_MISSING",
+            reason="Cannot keep history for unknown claim",
+            operator="tester",
+            db_path=db_path,
+        )

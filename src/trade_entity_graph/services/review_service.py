@@ -9,6 +9,8 @@ from trade_entity_graph.db.connection import get_connection
 from trade_entity_graph.services.history_reuse_service import get_history_context_for_claim
 from trade_entity_graph.utils.ids import new_id
 
+CURRENT_EFFECTIVE_STATUSES = ("verified", "manual_only", "rejected")
+
 
 def _write_decision_and_audit(
     connection,
@@ -136,6 +138,37 @@ def _fetch_relationship_or_raise(connection, relationship_id: str) -> dict[str, 
     return dict(relationship)
 
 
+def _fetch_current_effective_history_for_claim(
+    connection,
+    *,
+    claim: dict[str, Any],
+    relationship_id: str,
+) -> dict[str, Any]:
+    status_placeholders = ", ".join("?" for _ in CURRENT_EFFECTIVE_STATUSES)
+    relationship = connection.execute(
+        f"""
+        SELECT *
+        FROM curated_relationship
+        WHERE relationship_id = ?
+          AND relation_status IN ({status_placeholders})
+          AND valid_to IS NULL
+          AND from_entity_id = ?
+          AND to_entity_id = ?
+        """,
+        (
+            relationship_id,
+            *CURRENT_EFFECTIVE_STATUSES,
+            claim["from_entity_id"],
+            claim["to_entity_id"],
+        ),
+    ).fetchone()
+    if not relationship:
+        raise ValueError(
+            "Superseded relationship must be current-effective and match the claim pair"
+        )
+    return dict(relationship)
+
+
 def _resolve_history_relationship_id(
     claim_id: str,
     *,
@@ -228,13 +261,13 @@ def keep_history_for_claim(
 ) -> dict[str, Any]:
     """Keep the effective historical relationship and mark the claim as matched."""
 
-    history_relationship_id = _resolve_history_relationship_id(
-        claim_id,
-        old_relationship_id=None,
-        db_path=db_path,
-    )
     with get_connection(db_path) as connection:
         claim = _fetch_claim_or_raise(connection, claim_id)
+        history_relationship_id = _resolve_history_relationship_id(
+            claim_id,
+            old_relationship_id=None,
+            db_path=db_path,
+        )
         history = _fetch_relationship_or_raise(connection, history_relationship_id)
         after_status = "history_matched"
         connection.execute(
@@ -274,15 +307,19 @@ def supersede_history_with_claim(
 ) -> dict[str, Any]:
     """Deprecate the historical relationship and create a verified replacement."""
 
-    history_relationship_id = _resolve_history_relationship_id(
-        claim_id,
-        old_relationship_id=old_relationship_id,
-        db_path=db_path,
-    )
     relationship_id = new_id("REL")
     with get_connection(db_path) as connection:
         claim = _fetch_claim_or_raise(connection, claim_id)
-        old_relationship = _fetch_relationship_or_raise(connection, history_relationship_id)
+        history_relationship_id = _resolve_history_relationship_id(
+            claim_id,
+            old_relationship_id=old_relationship_id,
+            db_path=db_path,
+        )
+        old_relationship = _fetch_current_effective_history_for_claim(
+            connection,
+            claim=claim,
+            relationship_id=history_relationship_id,
+        )
         connection.execute(
             """
             UPDATE curated_relationship
