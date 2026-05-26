@@ -259,6 +259,49 @@ def test_review_relation_type_options_are_controlled_final_values() -> None:
     )
 
 
+
+def test_final_relation_type_for_candidate_maps_known_candidate_types() -> None:
+    assert (
+        streamlit_app.final_relation_type_for_candidate("trading_partner_candidate")
+        == "trading_partner"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("factory_candidate")
+        == "factory_node"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("sales_center_candidate")
+        == "sales_center"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("same_group_candidate")
+        == "same_group"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("subsidiary_candidate")
+        == "subsidiary"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("logistics_service_candidate")
+        == "logistics_service"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("same_entity_candidate")
+        == "same_entity"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("co_order_role_candidate")
+        == "co_order_role"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("unknown_candidate")
+        == "unknown"
+    )
+    assert (
+        streamlit_app.final_relation_type_for_candidate("unexpected_candidate")
+        == streamlit_app.DEFAULT_RELATION_TYPE
+    )
+
 def test_review_tab_uses_relation_type_selectboxes(monkeypatch) -> None:
     class FakeStreamlit:
         def __init__(self) -> None:
@@ -303,6 +346,144 @@ def test_review_tab_uses_relation_type_selectboxes(monkeypatch) -> None:
         "人工关系类型": streamlit_app.RELATION_TYPE_OPTIONS,
     }
 
+
+
+def test_review_tab_defaults_relation_type_from_candidate_type(monkeypatch) -> None:
+    class FakeExpander:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    class FakeStreamlit:
+        def __init__(self) -> None:
+            self.session_state = {streamlit_app.REVIEW_CLAIM_WIDGET_KEY: "CLM_1"}
+            self.selectbox_calls: list[tuple[str, tuple[str, ...], int]] = []
+
+        def subheader(self, *_args, **_kwargs) -> None:
+            return None
+
+        def text_input(self, _label, value="", key=None, **_kwargs) -> str:
+            if key == streamlit_app.REVIEW_CLAIM_WIDGET_KEY:
+                return "CLM_1"
+            return value
+
+        def markdown(self, *_args, **_kwargs) -> None:
+            return None
+
+        def expander(self, *_args, **_kwargs) -> FakeExpander:
+            return FakeExpander()
+
+        def json(self, *_args, **_kwargs) -> None:
+            return None
+
+        def selectbox(self, label, options, index=0, **_kwargs) -> str:
+            option_tuple = tuple(options)
+            self.selectbox_calls.append((label, option_tuple, index))
+            return option_tuple[index]
+
+        def text_area(self, *_args, **_kwargs) -> str:
+            return ""
+
+        def button(self, *_args, **_kwargs) -> bool:
+            return False
+
+        def divider(self) -> None:
+            return None
+
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_relationship_detail",
+        lambda _claim_id: {
+            "claim_id": "CLM_1",
+            "from_name": "ACME TRADING",
+            "to_name": "BETA FACTORY",
+            "candidate_relation_type": "factory_candidate",
+            "history_context": None,
+        },
+    )
+
+    streamlit_app.render_review_tab()
+
+    relation_type_calls = [
+        call
+        for call in fake_st.selectbox_calls
+        if call[0] == "\u5173\u7cfb\u7c7b\u578b"
+    ]
+    assert relation_type_calls
+    _label, options, index = relation_type_calls[0]
+    assert options[index] == "factory_node"
+
+
+def test_review_submit_value_error_displays_error(monkeypatch) -> None:
+    class FakeExpander:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    class FakeStreamlit:
+        def __init__(self) -> None:
+            self.session_state = {streamlit_app.REVIEW_CLAIM_WIDGET_KEY: "CLM_1"}
+            self.errors: list[str] = []
+
+        def subheader(self, *_args, **_kwargs) -> None:
+            return None
+
+        def text_input(self, _label, value="", key=None, **_kwargs) -> str:
+            if key == streamlit_app.REVIEW_CLAIM_WIDGET_KEY:
+                return "CLM_1"
+            return value
+
+        def markdown(self, *_args, **_kwargs) -> None:
+            return None
+
+        def expander(self, *_args, **_kwargs) -> FakeExpander:
+            return FakeExpander()
+
+        def json(self, *_args, **_kwargs) -> None:
+            return None
+
+        def selectbox(self, _label, options, index=0, **_kwargs) -> str:
+            return tuple(options)[index]
+
+        def text_area(self, *_args, **_kwargs) -> str:
+            return "reason"
+
+        def button(self, label, **_kwargs) -> bool:
+            return label == "\u63d0\u4ea4\u5ba1\u6838"
+
+        def error(self, message: str) -> None:
+            self.errors.append(message)
+
+        def divider(self) -> None:
+            return None
+
+    def raise_value_error(*_args, **_kwargs):
+        raise ValueError("claim already finalized")
+
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_relationship_detail",
+        lambda _claim_id: {
+            "claim_id": "CLM_1",
+            "from_name": "ACME TRADING",
+            "to_name": "BETA FACTORY",
+            "candidate_relation_type": "trading_partner_candidate",
+            "history_context": None,
+        },
+    )
+    monkeypatch.setattr(streamlit_app, "decide_relationship", raise_value_error)
+
+    streamlit_app.render_review_tab()
+
+    assert fake_st.errors == ["claim already finalized"]
 
 def test_review_detail_summary_includes_entity_names() -> None:
     summary = streamlit_app.format_relationship_detail_summary(

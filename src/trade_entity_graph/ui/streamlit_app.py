@@ -59,6 +59,17 @@ RELATION_TYPE_LABELS: dict[str, str] = {
     "unknown": "暂不确定",
     "rejected_relation": "否定关系",
 }
+CANDIDATE_TO_FINAL_RELATION_TYPE: dict[str, str] = {
+    "trading_partner_candidate": "trading_partner",
+    "factory_candidate": "factory_node",
+    "sales_center_candidate": "sales_center",
+    "same_group_candidate": "same_group",
+    "subsidiary_candidate": "subsidiary",
+    "logistics_service_candidate": "logistics_service",
+    "same_entity_candidate": "same_entity",
+    "co_order_role_candidate": "co_order_role",
+    "unknown_candidate": "unknown",
+}
 
 
 class IntroSection(TypedDict):
@@ -150,6 +161,17 @@ def _relation_type_index(relation_type: str) -> int:
     if relation_type in RELATION_TYPE_OPTIONS:
         return RELATION_TYPE_OPTIONS.index(relation_type)
     return RELATION_TYPE_OPTIONS.index(DEFAULT_RELATION_TYPE)
+
+
+def final_relation_type_for_candidate(candidate_relation_type: str | None) -> str:
+    """Map a candidate relation type to the safest likely final value."""
+
+    if not candidate_relation_type:
+        return DEFAULT_RELATION_TYPE
+    return CANDIDATE_TO_FINAL_RELATION_TYPE.get(
+        candidate_relation_type,
+        DEFAULT_RELATION_TYPE,
+    )
 
 
 def format_relation_type_option(relation_type: str) -> str:
@@ -674,9 +696,14 @@ def render_review_tab() -> None:
         action_options,
         format_func=lambda action: action_labels.get(action, action),
     )
-    default_relation_type = (
-        "rejected_relation" if action_type == "reject" else DEFAULT_RELATION_TYPE
+    candidate_relation_type = (
+        relationship_detail.get("candidate_relation_type")
+        if relationship_detail
+        else None
     )
+    default_relation_type = final_relation_type_for_candidate(candidate_relation_type)
+    if action_type == "reject":
+        default_relation_type = "rejected_relation"
     relation_type = None
     if action_type in {"confirm", "modify", "reject", "supersede_history"}:
         relation_type = st.selectbox(
@@ -688,39 +715,43 @@ def render_review_tab() -> None:
     reason = st.text_area("\u5224\u65ad\u7406\u7531")
     operator = st.text_input("\u64cd\u4f5c\u4eba", value="local_user")
     if st.button("\u63d0\u4ea4\u5ba1\u6838") and claim_id:
-        if action_type == "keep_history":
-            result = keep_history_for_claim(
-                claim_id,
-                reason=reason,
-                operator=operator,
-            )
-        elif action_type == "mark_pending_verify":
-            result = mark_claim_pending_verify(
-                claim_id,
-                reason=reason,
-                operator=operator,
-            )
-        elif action_type == "supersede_history":
-            result = supersede_history_with_claim(
-                claim_id,
-                old_relationship_id=(
-                    _history_relationship_id(history_context)
-                    if isinstance(history_context, dict)
-                    else None
-                ),
-                relation_type=relation_type or DEFAULT_RELATION_TYPE,
-                reason=reason,
-                operator=operator,
-            )
+        try:
+            if action_type == "keep_history":
+                result = keep_history_for_claim(
+                    claim_id,
+                    reason=reason,
+                    operator=operator,
+                )
+            elif action_type == "mark_pending_verify":
+                result = mark_claim_pending_verify(
+                    claim_id,
+                    reason=reason,
+                    operator=operator,
+                )
+            elif action_type == "supersede_history":
+                result = supersede_history_with_claim(
+                    claim_id,
+                    old_relationship_id=(
+                        _history_relationship_id(history_context)
+                        if isinstance(history_context, dict)
+                        else None
+                    ),
+                    relation_type=relation_type or default_relation_type,
+                    reason=reason,
+                    operator=operator,
+                )
+            else:
+                result = decide_relationship(
+                    claim_id,
+                    action_type=action_type,
+                    relation_type=relation_type or default_relation_type,
+                    reason=reason,
+                    operator=operator,
+                )
+        except ValueError as exc:
+            st.error(str(exc))
         else:
-            result = decide_relationship(
-                claim_id,
-                action_type=action_type,
-                relation_type=relation_type or default_relation_type,
-                reason=reason,
-                operator=operator,
-            )
-        st.json(result)
+            st.json(result)
 
     st.divider()
     st.subheader("\u4eba\u5de5\u65b0\u589e\u5173\u7cfb")
@@ -744,15 +775,18 @@ def render_review_tab() -> None:
     )
     manual_reason = st.text_area("\u4eba\u5de5\u65b0\u589e\u7406\u7531")
     if st.button("\u521b\u5efa\u4eba\u5de5\u5173\u7cfb") and from_entity_id and to_entity_id:
-        st.json(
-            create_manual_relationship(
+        try:
+            result = create_manual_relationship(
                 from_entity_id,
                 to_entity_id,
                 relation_type=manual_relation_type,
                 reason=manual_reason,
                 operator=operator,
             )
-        )
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.json(result)
 
 
 def render_export_tab() -> None:
