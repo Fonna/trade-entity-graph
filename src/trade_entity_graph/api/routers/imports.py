@@ -44,7 +44,7 @@ def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
     history_reuse = {"history_matched": 0, "history_conflict": 0, "unchanged": 0}
     if request.generate_edges:
         edge_count = generate_order_role_edges(run_id=result.run_id)["edge_count"]
-    if request.aggregate_claims:
+    if request.aggregate_claims and edge_count > 0:
         claim_count = aggregate_relationship_claims(run_id=result.run_id)["claim_count"]
         history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
     elif result.claim_count > 0:

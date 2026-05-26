@@ -629,3 +629,56 @@ def test_import_endpoint_applies_history_reuse_to_imported_claims_without_aggreg
         "unchanged": 0,
     }
     assert calls == ["RUN_IMPORTED_CLAIMS"]
+
+
+def test_import_endpoint_default_preserves_imported_claims_without_edges(
+    monkeypatch,
+) -> None:
+    class ImportResult:
+        run_id = "RUN_IMPORTED_CLAIMS_DEFAULT"
+        entity_count = 2
+        alias_count = 0
+        evidence_count = 0
+        claim_count = 1
+        skipped_rows = []
+        archived_files = []
+
+    calls = []
+
+    def fail_if_aggregated(*, run_id):
+        raise AssertionError(f"should not aggregate imported claims without edges: {run_id}")
+
+    def fake_apply_history_reuse_to_claims(*, run_id):
+        calls.append(run_id)
+        return {"history_matched": 1, "history_conflict": 0, "unchanged": 0}
+
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.run_import",
+        lambda inputs: ImportResult(),
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.generate_order_role_edges",
+        lambda *, run_id: {"edge_count": 0},
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.aggregate_relationship_claims",
+        fail_if_aggregated,
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.apply_history_reuse_to_claims",
+        fake_apply_history_reuse_to_claims,
+    )
+
+    payload = run_import_endpoint(
+        ImportRunRequest(
+            relationships_path="relationships.csv",
+        )
+    )
+
+    assert payload["claim_count"] == 1
+    assert payload["history_reuse"] == {
+        "history_matched": 1,
+        "history_conflict": 0,
+        "unchanged": 0,
+    }
+    assert calls == ["RUN_IMPORTED_CLAIMS_DEFAULT"]
