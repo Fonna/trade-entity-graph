@@ -246,11 +246,31 @@ def test_demo_pending_candidate_is_visible_then_hidden_after_review(
             """
             SELECT *
             FROM relationship_claim rc
-            WHERE NOT EXISTS (
+            WHERE rc.relation_status = 'candidate'
+              AND NOT EXISTS (
                 SELECT 1
                 FROM curated_relationship cr
                 WHERE cr.decision_source = rc.claim_id
-            )
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                FROM curated_relationship history
+                WHERE history.relation_status IN ('verified', 'manual_only', 'rejected')
+                  AND history.valid_to IS NULL
+                  AND (
+                    (
+                      history.from_entity_id = rc.from_entity_id
+                      AND history.to_entity_id = rc.to_entity_id
+                    )
+                    OR (
+                      history.from_entity_id = rc.to_entity_id
+                      AND history.to_entity_id = rc.from_entity_id
+                      AND history.relation_type IN (
+                        'same_entity', 'same_group', 'trading_partner'
+                      )
+                    )
+                  )
+              )
             ORDER BY rc.confidence_score DESC, rc.order_count DESC
             LIMIT 1
             """

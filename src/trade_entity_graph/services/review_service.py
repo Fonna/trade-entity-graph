@@ -9,6 +9,7 @@ from typing import Any
 from trade_entity_graph.db.connection import get_connection
 from trade_entity_graph.services.history_reuse_service import (
     SYMMETRIC_RELATION_TYPES,
+    classify_claim_against_history,
     get_history_context_for_claim,
 )
 from trade_entity_graph.utils.ids import new_id
@@ -239,6 +240,14 @@ def _ensure_claim_has_no_history_final_decision(connection, claim_id: str) -> No
         raise ValueError(f"Claim already finalized by history review: {claim_id}")
 
 
+def _ensure_claim_has_no_effective_history_context(connection, claim: dict[str, Any]) -> None:
+    if classify_claim_against_history(connection, claim) is not None:
+        raise ValueError(
+            "Claim has effective historical relationship context; "
+            "use history-aware review action"
+        )
+
+
 def _raise_duplicate_review_error(claim_id: str) -> None:
     raise ValueError(f"Claim already has a reviewed relationship: {claim_id}")
 
@@ -283,6 +292,7 @@ def decide_relationship(
         )
         _ensure_claim_has_no_curated_relationship(connection, claim_id)
         _ensure_claim_has_no_history_final_decision(connection, claim_id)
+        _ensure_claim_has_no_effective_history_context(connection, claim)
 
         relationship_id = new_id("REL")
         after_status = status_by_action[action_type]

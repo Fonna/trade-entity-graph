@@ -342,6 +342,99 @@ def test_relationship_api_confirm_rejects_history_conflict_claim(
     assert claim_relationship_count == 0
 
 
+def test_relationship_api_confirm_rejects_candidate_with_unapplied_history(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-candidate-history-confirm.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_CANDIDATE_HISTORY', 'api-candidate-history.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_API_CANDIDATE_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_API_CANDIDATE_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id, from_entity_id, to_entity_id, relation_type,
+                relation_status, source_type, decision_note, verified_by, verified_at
+            )
+            VALUES (
+                'REL_API_CANDIDATE_HISTORY', 'ENT_API_CANDIDATE_FROM',
+                'ENT_API_CANDIDATE_TO', 'trading_partner', 'rejected', 'manual',
+                'Historical rejection', 'reviewer', CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_API_CANDIDATE_WITH_HISTORY', 'ENT_API_CANDIDATE_FROM',
+                'ENT_API_CANDIDATE_TO', 'trading_partner_candidate',
+                'candidate', 'high', 0.88, 5, 21.5,
+                '5 orders, 21.5 TEU', 'RUN_API_CANDIDATE_HISTORY'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_API_CANDIDATE_WITH_HISTORY/decision",
+        json_body={
+            "action_type": "confirm",
+            "relation_type": "trading_partner",
+            "reason": "Ordinary confirm should not bypass unapplied history",
+            "operator": "tester",
+        },
+    )
+
+    assert 400 <= status < 500
+    assert "history-aware review action" in payload["detail"]
+    with get_connection(db_path) as connection:
+        claim_relationship_count = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM curated_relationship
+            WHERE decision_source = 'CLM_API_CANDIDATE_WITH_HISTORY'
+            """
+        ).fetchone()["count"]
+        old_relationship = connection.execute(
+            """
+            SELECT relation_status, valid_to
+            FROM curated_relationship
+            WHERE relationship_id = 'REL_API_CANDIDATE_HISTORY'
+            """
+        ).fetchone()
+
+    assert claim_relationship_count == 0
+    assert dict(old_relationship) == {"relation_status": "rejected", "valid_to": None}
+
+
 def test_relationship_api_invalid_action_type_returns_json_4xx(
     tmp_path, monkeypatch
 ) -> None:

@@ -165,6 +165,23 @@ def _seed_history_conflict(db_path) -> tuple[str, str]:
     return claim_id, history_id
 
 
+def _seed_candidate_with_effective_history(db_path) -> tuple[str, str]:
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        _insert_batch(connection)
+        acme = _insert_entity(connection, "ACME TRADING")
+        beta = _insert_entity(connection, "BETA FACTORY")
+        claim_id = _insert_high_confidence_claim(connection, acme, beta)
+        history_id = _insert_history(
+            connection,
+            acme,
+            beta,
+            relation_status="rejected",
+        )
+        connection.commit()
+        return claim_id, history_id
+
+
 def _seed_fresh_candidate(db_path) -> str:
     initialize_database(db_path)
     with get_connection(db_path) as connection:
@@ -265,6 +282,64 @@ def test_decide_relationship_rejects_history_conflict_without_curated_row(
 
     assert claim_relationship_count == {"count": 0}
     assert relationship_count == {"count": 1}
+
+
+def test_decide_relationship_rejects_candidate_with_unapplied_effective_history(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, history_id = _seed_candidate_with_effective_history(db_path)
+
+    with pytest.raises(ValueError, match="history-aware review action"):
+        decide_relationship(
+            claim_id,
+            action_type="confirm",
+            relation_type="trading_partner",
+            reason="Ordinary review must not bypass unapplied historical supersede",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim_relationship_count = _fetch_one(
+        db_path,
+        """
+        SELECT COUNT(*) AS count
+        FROM curated_relationship
+        WHERE decision_source = ?
+        """,
+        (claim_id,),
+    )
+    old_relationship = _fetch_one(
+        db_path,
+        """
+        SELECT relation_status, valid_to
+        FROM curated_relationship
+        WHERE relationship_id = ?
+        """,
+        (history_id,),
+    )
+
+    assert claim_relationship_count == {"count": 0}
+    assert old_relationship == {"relation_status": "rejected", "valid_to": None}
+
+
+def test_decide_relationship_accepts_fresh_candidate_without_effective_history(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id = _seed_fresh_candidate(db_path)
+
+    result = decide_relationship(
+        claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Ordinary review for fresh evidence",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    assert result["decision_source"] == claim_id
+    assert result["relation_status"] == "verified"
 
 
 def test_keep_history_for_claim_reuses_history_without_duplicate_relationship(tmp_path) -> None:
