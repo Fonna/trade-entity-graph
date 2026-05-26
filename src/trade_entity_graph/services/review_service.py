@@ -391,6 +391,7 @@ def supersede_history_with_claim(
         claim = _fetch_claim_or_raise(connection, claim_id)
         _validate_supersede_claim_state(claim)
         _ensure_claim_has_no_curated_relationship(connection, claim_id)
+        _ensure_claim_has_no_history_final_decision(connection, claim_id)
         history_relationship_id = _resolve_history_relationship_id(
             claim_id,
             old_relationship_id=old_relationship_id,
@@ -476,14 +477,23 @@ def supersede_history_with_claim(
                 history_relationship_id,
             ),
         )
-        connection.execute(
+        claim_cursor = connection.execute(
             """
             UPDATE relationship_claim
             SET relation_status = 'verified', updated_at = CURRENT_TIMESTAMP
             WHERE claim_id = ?
+              AND relation_status = ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM relationship_decision rd
+                  WHERE rd.claim_id = relationship_claim.claim_id
+                    AND rd.action_type IN ('keep_history', 'supersede')
+              )
             """,
-            (claim_id,),
+            (claim_id, claim["relation_status"]),
         )
+        if claim_cursor.rowcount != 1:
+            raise ValueError("Claim already finalized by history review")
         _write_decision_and_audit(
             connection,
             relationship_id=relationship_id,
@@ -548,11 +558,19 @@ def mark_claim_pending_verify(
             SET relation_status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE claim_id = ?
               AND relation_status IN ({status_placeholders})
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM relationship_decision rd
+                  WHERE rd.claim_id = relationship_claim.claim_id
+                    AND rd.action_type IN ('keep_history', 'supersede')
+              )
             """,
             (after_status, claim_id, *MARK_PENDING_CLAIM_STATUSES),
         )
         if cursor.rowcount != 1:
-            raise ValueError("Claim must be in an allowed state to mark pending verify")
+            raise ValueError(
+                "Claim must be in an allowed, unfinalized state to mark pending verify"
+            )
         _write_claim_decision_and_audit(
             connection,
             claim=claim,

@@ -95,6 +95,26 @@ def _insert_history(
     return relationship_id
 
 
+def _insert_decision(
+    connection,
+    claim_id: str,
+    relationship_id: str | None,
+    *,
+    action_type: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO relationship_decision (
+            decision_id, relationship_id, claim_id, action_type,
+            before_status, after_status, reason, operator
+        )
+        VALUES (?, ?, ?, ?, 'history_conflict', 'history_matched',
+                'Pre-existing review decision', 'tester')
+        """,
+        (new_id("DEC"), relationship_id, claim_id, action_type),
+    )
+
+
 def _read_claim_status(db_path, claim_id: str) -> str:
     with get_connection(db_path) as connection:
         return connection.execute(
@@ -320,3 +340,33 @@ def test_empty_reason_rerun_does_not_duplicate_history_reuse_note(tmp_path) -> N
 
     reason = _read_claim_reason(db_path, claim_id)
     assert reason.count("history reuse:") == 1
+
+
+def test_reviewed_claim_is_unchanged_by_history_reuse_rerun(tmp_path) -> None:
+    db_path = tmp_path / "history.db"
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        _insert_batch(connection)
+        acme = _insert_entity(connection, "ACME TRADING")
+        omega = _insert_entity(connection, "OMEGA BUYER")
+        claim_id = _insert_claim(connection, acme, omega, confidence_level="high")
+        history_id = _insert_history(
+            connection,
+            acme,
+            omega,
+            relation_type="trading_partner",
+            relation_status="rejected",
+        )
+        connection.commit()
+
+    apply_history_reuse_to_claims(run_id="RUN_HISTORY", db_path=db_path)
+    with get_connection(db_path) as connection:
+        _insert_decision(connection, claim_id, history_id, action_type="keep_history")
+        connection.commit()
+    reason_before = _read_claim_reason(db_path, claim_id)
+
+    result = apply_history_reuse_to_claims(run_id="RUN_HISTORY", db_path=db_path)
+
+    assert result == {"history_matched": 0, "history_conflict": 0, "unchanged": 1}
+    assert _read_claim_status(db_path, claim_id) == "history_conflict"
+    assert _read_claim_reason(db_path, claim_id) == reason_before

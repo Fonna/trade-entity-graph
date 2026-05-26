@@ -99,6 +99,26 @@ def _insert_high_confidence_claim(connection, from_entity_id: str, to_entity_id:
     return claim_id
 
 
+def _insert_decision(
+    connection,
+    claim_id: str,
+    relationship_id: str | None,
+    *,
+    action_type: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO relationship_decision (
+            decision_id, relationship_id, claim_id, action_type,
+            before_status, after_status, reason, operator
+        )
+        VALUES (?, ?, ?, ?, 'history_conflict', 'history_matched',
+                'Pre-existing final decision', 'tester')
+        """,
+        (new_id("DEC"), relationship_id, claim_id, action_type),
+    )
+
+
 def _seed_history_conflict(db_path) -> tuple[str, str]:
     initialize_database(db_path)
     with get_connection(db_path) as connection:
@@ -460,6 +480,44 @@ def test_supersede_history_with_claim_rejects_existing_claim_relationship(tmp_pa
     assert claim_relationships == [
         {"relationship_id": existing["relationship_id"], "source_type": "claim"}
     ]
+
+
+def test_supersede_history_with_claim_rejects_existing_final_history_decision(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, history_id = _seed_history_conflict(db_path)
+    with get_connection(db_path) as connection:
+        _insert_decision(connection, claim_id, history_id, action_type="keep_history")
+        connection.commit()
+
+    with pytest.raises(ValueError, match="already finalized"):
+        supersede_history_with_claim(
+            claim_id,
+            old_relationship_id=history_id,
+            relation_type="factory_node",
+            reason="Should not supersede after final history decision",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    old_relationship = _fetch_one(
+        db_path,
+        "SELECT relation_status, valid_to FROM curated_relationship WHERE relationship_id = ?",
+        (history_id,),
+    )
+    claim_relationship_count = _fetch_one(
+        db_path,
+        """
+        SELECT COUNT(*) AS count
+        FROM curated_relationship
+        WHERE decision_source = ?
+        """,
+        (claim_id,),
+    )
+
+    assert old_relationship == {"relation_status": "rejected", "valid_to": None}
+    assert claim_relationship_count == {"count": 0}
 
 
 def test_keep_history_for_claim_rejects_claim_with_ordinary_decision(tmp_path) -> None:

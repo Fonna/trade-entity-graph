@@ -226,21 +226,36 @@ def apply_history_reuse_to_claims(
                 continue
 
             outcome = context["outcome"]
-            counters[outcome] += 1
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE relationship_claim
                 SET relation_status = ?,
                     recommendation_reason = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE claim_id = ?
+                  AND relation_status = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM relationship_decision rd
+                      WHERE rd.claim_id = relationship_claim.claim_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM curated_relationship cr
+                      WHERE cr.decision_source = relationship_claim.claim_id
+                  )
                 """,
                 (
                     outcome,
                     _append_history_reason(claim["recommendation_reason"], context["reason"]),
                     claim["claim_id"],
+                    claim["relation_status"],
                 ),
             )
+            if cursor.rowcount == 1:
+                counters[outcome] += 1
+            else:
+                counters["unchanged"] += 1
 
         connection.commit()
 
