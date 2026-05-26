@@ -201,6 +201,20 @@ def _validate_claim_state(
         raise ValueError(f"Claim must be in one of ({allowed}) to {action}")
 
 
+def _ensure_claim_has_no_curated_relationship(connection, claim_id: str) -> None:
+    existing = connection.execute(
+        """
+        SELECT relationship_id
+        FROM curated_relationship
+        WHERE decision_source = ?
+        LIMIT 1
+        """,
+        (claim_id,),
+    ).fetchone()
+    if existing:
+        raise ValueError(f"Claim already has a reviewed relationship: {claim_id}")
+
+
 def _resolve_history_relationship_id(
     claim_id: str,
     *,
@@ -352,6 +366,7 @@ def supersede_history_with_claim(
     with get_connection(db_path) as connection:
         claim = _fetch_claim_or_raise(connection, claim_id)
         _validate_supersede_claim_state(claim)
+        _ensure_claim_has_no_curated_relationship(connection, claim_id)
         history_relationship_id = _resolve_history_relationship_id(
             claim_id,
             old_relationship_id=old_relationship_id,
@@ -421,7 +436,7 @@ def supersede_history_with_claim(
                 decision_source, decision_note, verified_by, verified_at,
                 valid_from, supersedes_relationship_id
             )
-            VALUES (?, ?, ?, ?, 'verified', ?, ?, 'claim', ?, ?, ?,
+            VALUES (?, ?, ?, ?, 'verified', ?, ?, 'reviewed_claim', ?, ?, ?,
                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
             """,
             (

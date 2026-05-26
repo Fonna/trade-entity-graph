@@ -98,6 +98,28 @@ def _insert_high_confidence_claim(connection, from_entity_id: str, to_entity_id:
     return claim_id
 
 
+def _insert_existing_reviewed_relationship(
+    connection,
+    claim_id: str,
+    from_entity_id: str,
+    to_entity_id: str,
+) -> str:
+    relationship_id = new_id("REL")
+    connection.execute(
+        """
+        INSERT INTO curated_relationship (
+            relationship_id, from_entity_id, to_entity_id, relation_type,
+            relation_status, source_type, decision_source, decision_note,
+            verified_by, verified_at
+        )
+        VALUES (?, ?, ?, 'trading_partner', 'verified', 'reviewed_claim', ?,
+                'Already reviewed', 'reviewer', CURRENT_TIMESTAMP)
+        """,
+        (relationship_id, from_entity_id, to_entity_id, claim_id),
+    )
+    return relationship_id
+
+
 def _seed_history_conflict(db_path) -> tuple[str, str]:
     initialize_database(db_path)
     with get_connection(db_path) as connection:
@@ -218,6 +240,7 @@ def test_supersede_history_with_claim_deprecates_old_and_creates_verified_relati
     assert len(new_relationships) == 1
     assert new_relationships[0]["relation_status"] == "verified"
     assert new_relationships[0]["relation_type"] == "factory_node"
+    assert new_relationships[0]["source_type"] == "reviewed_claim"
     supersede_decision = next(
         decision for decision in decisions if decision["action_type"] == "supersede"
     )
@@ -404,6 +427,52 @@ def test_supersede_history_with_claim_cannot_be_repeated_for_verified_claim(tmp_
         }
     ]
     assert chained_replacements == []
+
+
+def test_supersede_history_with_claim_rejects_existing_claim_relationship(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, history_id = _seed_history_conflict(db_path)
+    with get_connection(db_path) as connection:
+        claim = connection.execute(
+            "SELECT from_entity_id, to_entity_id FROM relationship_claim WHERE claim_id = ?",
+            (claim_id,),
+        ).fetchone()
+        existing_id = _insert_existing_reviewed_relationship(
+            connection,
+            claim_id,
+            claim["from_entity_id"],
+            claim["to_entity_id"],
+        )
+        connection.commit()
+
+    with pytest.raises(ValueError, match="already has a reviewed relationship"):
+        supersede_history_with_claim(
+            claim_id,
+            old_relationship_id=history_id,
+            relation_type="factory_node",
+            reason="Should not duplicate reviewed claim output",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    old_relationship = _fetch_one(
+        db_path,
+        "SELECT relation_status, valid_to FROM curated_relationship WHERE relationship_id = ?",
+        (history_id,),
+    )
+    claim_relationships = _fetch_all(
+        db_path,
+        """
+        SELECT relationship_id
+        FROM curated_relationship
+        WHERE decision_source = ?
+        ORDER BY relationship_id
+        """,
+        (claim_id,),
+    )
+
+    assert old_relationship == {"relation_status": "rejected", "valid_to": None}
+    assert claim_relationships == [{"relationship_id": existing_id}]
 
 
 def test_keep_history_for_claim_rejects_verified_claim_after_supersede(tmp_path) -> None:
