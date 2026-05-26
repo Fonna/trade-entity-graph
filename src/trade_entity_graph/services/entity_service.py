@@ -57,7 +57,9 @@ def get_entity_detail(
         curated_count = connection.execute(
             """
             SELECT COUNT(*) FROM curated_relationship
-            WHERE from_entity_id = ? OR to_entity_id = ?
+            WHERE (from_entity_id = ? OR to_entity_id = ?)
+              AND valid_to IS NULL
+              AND relation_status != 'deprecated'
             """,
             (entity_id, entity_id),
         ).fetchone()[0]

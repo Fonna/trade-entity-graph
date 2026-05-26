@@ -28,6 +28,8 @@ def export_relationship_rows(
             JOIN entity e1 ON e1.entity_id = cr.from_entity_id
             JOIN entity e2 ON e2.entity_id = cr.to_entity_id
             WHERE (cr.from_entity_id = ? OR cr.to_entity_id = ?)
+              AND cr.valid_to IS NULL
+              AND cr.relation_status != 'deprecated'
             {status_filter}
             ORDER BY e1.canonical_name, e2.canonical_name
             """,

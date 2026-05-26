@@ -200,6 +200,66 @@ def test_ego_graph_includes_pending_claims_and_hides_reviewed_claims(tmp_path) -
     assert reviewed["relationship_id"] in curated_ids
 
 
+def test_deprecated_relationship_is_hidden_from_graph_export_and_entity_counts(tmp_path) -> None:
+    db_path = _seed_p0_flow(tmp_path)
+    acme_id = _entity_id(db_path, "ACME TRADING")
+    claim_id = _claim_id(db_path, "ACME TRADING", "BETA FACTORY")
+    confirmed = decide_relationship(
+        claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Confirmed by sales",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            UPDATE curated_relationship
+            SET relation_status = 'deprecated',
+                valid_to = CURRENT_TIMESTAMP
+            WHERE relationship_id = ?
+            """,
+            (confirmed["relationship_id"],),
+        )
+        connection.commit()
+
+    graph = get_ego_graph(acme_id, db_path=db_path, include_rejected=True)
+    exported = export_relationship_rows(acme_id, db_path=db_path, include_rejected=True)
+    detail = get_entity_detail(acme_id, db_path=db_path)
+
+    assert all(edge["id"] != confirmed["relationship_id"] for edge in graph["edges"])
+    assert all(row["relationship_id"] != confirmed["relationship_id"] for row in exported)
+    assert detail is not None
+    assert detail["curated_relationship_count"] == 0
+
+
+def test_ego_graph_includes_history_conflict_claim_edges(tmp_path) -> None:
+    db_path = _seed_p0_flow(tmp_path)
+    acme_id = _entity_id(db_path, "ACME TRADING")
+    beta_claim_id = _claim_id(db_path, "ACME TRADING", "BETA FACTORY")
+
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            UPDATE relationship_claim
+            SET relation_status = 'history_conflict'
+            WHERE claim_id = ?
+            """,
+            (beta_claim_id,),
+        )
+        connection.commit()
+
+    graph = get_ego_graph(acme_id, db_path=db_path)
+    history_conflict_edge = next(
+        edge for edge in graph["edges"] if edge["id"] == beta_claim_id
+    )
+
+    assert history_conflict_edge["edge_type"] == "relationship_claim"
+    assert history_conflict_edge["status"] == "history_conflict"
+
+
 def test_ego_graph_hides_rejected_relationship_nodes_by_default(tmp_path) -> None:
     db_path = _seed_p0_flow(tmp_path)
     acme_id = _entity_id(db_path, "ACME TRADING")

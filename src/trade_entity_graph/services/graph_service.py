@@ -7,7 +7,7 @@ from typing import Any
 
 from trade_entity_graph.db.connection import get_connection
 
-PENDING_CLAIM_STATUSES = ("candidate", "pending_verify")
+PENDING_CLAIM_STATUSES = ("candidate", "pending_verify", "history_conflict")
 
 
 def _entity_node(row: Any, *, center_entity_id: str) -> dict[str, Any]:
@@ -107,25 +107,19 @@ def get_ego_graph(
             """,
             (center_entity_id, center_entity_id),
         ).fetchall()
-        curated_sql = """
+        rejected_filter = "" if include_rejected else "AND cr.relation_status != 'rejected'"
+        curated_sql = f"""
             SELECT cr.*, e1.canonical_name AS from_name, e2.canonical_name AS to_name
             FROM curated_relationship cr
             JOIN entity e1 ON e1.entity_id = cr.from_entity_id
             JOIN entity e2 ON e2.entity_id = cr.to_entity_id
-            WHERE cr.from_entity_id = ? OR cr.to_entity_id = ?
+            WHERE (cr.from_entity_id = ? OR cr.to_entity_id = ?)
+              AND cr.valid_to IS NULL
+              AND cr.relation_status != 'deprecated'
+              {rejected_filter}
             ORDER BY cr.created_at
         """
         curated_params = (center_entity_id, center_entity_id)
-        if not include_rejected:
-            curated_sql = """
-                SELECT cr.*, e1.canonical_name AS from_name, e2.canonical_name AS to_name
-                FROM curated_relationship cr
-                JOIN entity e1 ON e1.entity_id = cr.from_entity_id
-                JOIN entity e2 ON e2.entity_id = cr.to_entity_id
-                WHERE (cr.from_entity_id = ? OR cr.to_entity_id = ?)
-                  AND cr.relation_status != 'rejected'
-                ORDER BY cr.created_at
-            """
         curated_edges = connection.execute(curated_sql, curated_params).fetchall()
         pending_status_placeholders = ", ".join("?" for _ in PENDING_CLAIM_STATUSES)
         claim_edges = connection.execute(
