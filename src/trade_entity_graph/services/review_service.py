@@ -15,6 +15,12 @@ from trade_entity_graph.utils.ids import new_id
 CURRENT_EFFECTIVE_STATUSES = ("verified", "manual_only", "rejected")
 KEEP_HISTORY_CLAIM_STATUSES = ("history_conflict", "pending_verify")
 MARK_PENDING_CLAIM_STATUSES = ("candidate", "history_conflict", "history_matched")
+ORDINARY_DECISION_CLAIM_STATUSES = (
+    "candidate",
+    "pending_verify",
+    "history_conflict",
+    "history_matched",
+)
 SUPERSEDE_CLAIM_STATUSES = ("history_conflict",)
 
 
@@ -215,6 +221,21 @@ def _ensure_claim_has_no_curated_relationship(connection, claim_id: str) -> None
         raise ValueError(f"Claim already has a reviewed relationship: {claim_id}")
 
 
+def _ensure_claim_has_no_history_final_decision(connection, claim_id: str) -> None:
+    existing = connection.execute(
+        """
+        SELECT decision_id
+        FROM relationship_decision
+        WHERE claim_id = ?
+          AND action_type IN ('keep_history', 'supersede')
+        LIMIT 1
+        """,
+        (claim_id,),
+    ).fetchone()
+    if existing:
+        raise ValueError(f"Claim already finalized by history review: {claim_id}")
+
+
 def _resolve_history_relationship_id(
     claim_id: str,
     *,
@@ -246,12 +267,14 @@ def decide_relationship(
         raise ValueError(f"Unsupported action_type: {action_type}")
 
     with get_connection(db_path) as connection:
-        claim = connection.execute(
-            "SELECT * FROM relationship_claim WHERE claim_id = ?",
-            (claim_id,),
-        ).fetchone()
-        if not claim:
-            raise ValueError(f"Unknown relationship claim: {claim_id}")
+        claim = _fetch_claim_or_raise(connection, claim_id)
+        _validate_claim_state(
+            claim,
+            allowed_statuses=ORDINARY_DECISION_CLAIM_STATUSES,
+            action="decide relationship",
+        )
+        _ensure_claim_has_no_curated_relationship(connection, claim_id)
+        _ensure_claim_has_no_history_final_decision(connection, claim_id)
 
         relationship_id = new_id("REL")
         after_status = status_by_action[action_type]
@@ -314,6 +337,7 @@ def keep_history_for_claim(
             allowed_statuses=KEEP_HISTORY_CLAIM_STATUSES,
             action="keep history",
         )
+        _ensure_claim_has_no_curated_relationship(connection, claim_id)
         history_relationship_id = _resolve_history_relationship_id(
             claim_id,
             old_relationship_id=None,
@@ -514,6 +538,7 @@ def mark_claim_pending_verify(
             allowed_statuses=MARK_PENDING_CLAIM_STATUSES,
             action="mark pending verify",
         )
+        _ensure_claim_has_no_curated_relationship(connection, claim_id)
         after_status = "pending_verify"
         status_placeholders = ", ".join("?" for _ in MARK_PENDING_CLAIM_STATUSES)
         cursor = connection.execute(

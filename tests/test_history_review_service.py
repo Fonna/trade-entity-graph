@@ -462,6 +462,191 @@ def test_supersede_history_with_claim_rejects_existing_claim_relationship(tmp_pa
     ]
 
 
+def test_keep_history_for_claim_rejects_claim_with_ordinary_decision(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, history_id = _seed_history_conflict(db_path)
+    existing = decide_relationship(
+        claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Ordinary review already created relationship",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with pytest.raises(ValueError, match="already has a reviewed relationship"):
+        keep_history_for_claim(
+            claim_id,
+            reason="Should not keep history after ordinary review",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim = _fetch_one(
+        db_path,
+        "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+    claim_relationships = _fetch_all(
+        db_path,
+        """
+        SELECT relationship_id
+        FROM curated_relationship
+        WHERE decision_source = ?
+        """,
+        (claim_id,),
+    )
+    keep_decisions = _fetch_one(
+        db_path,
+        """
+        SELECT COUNT(*) AS count
+        FROM relationship_decision
+        WHERE claim_id = ? AND action_type = 'keep_history'
+        """,
+        (claim_id,),
+    )
+    keep_audits = _fetch_one(
+        db_path,
+        """
+        SELECT COUNT(*) AS count
+        FROM audit_log
+        WHERE object_type = 'relationship_claim'
+          AND object_id = ?
+          AND action_type = 'keep_history'
+        """,
+        (claim_id,),
+    )
+    old_relationship = _fetch_one(
+        db_path,
+        "SELECT relation_status, valid_to FROM curated_relationship WHERE relationship_id = ?",
+        (history_id,),
+    )
+
+    assert claim == {"relation_status": "history_conflict"}
+    assert claim_relationships == [{"relationship_id": existing["relationship_id"]}]
+    assert keep_decisions == {"count": 0}
+    assert keep_audits == {"count": 0}
+    assert old_relationship == {"relation_status": "rejected", "valid_to": None}
+
+
+def test_mark_claim_pending_verify_rejects_claim_with_ordinary_decision(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, _history_id = _seed_history_conflict(db_path)
+    existing = decide_relationship(
+        claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Ordinary review already created relationship",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with pytest.raises(ValueError, match="already has a reviewed relationship"):
+        mark_claim_pending_verify(
+            claim_id,
+            reason="Should not mark pending after ordinary review",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim = _fetch_one(
+        db_path,
+        "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+    claim_relationships = _fetch_all(
+        db_path,
+        """
+        SELECT relationship_id
+        FROM curated_relationship
+        WHERE decision_source = ?
+        """,
+        (claim_id,),
+    )
+    pending_decisions = _fetch_one(
+        db_path,
+        """
+        SELECT COUNT(*) AS count
+        FROM relationship_decision
+        WHERE claim_id = ? AND action_type = 'mark_pending_verify'
+        """,
+        (claim_id,),
+    )
+
+    assert claim == {"relation_status": "history_conflict"}
+    assert claim_relationships == [{"relationship_id": existing["relationship_id"]}]
+    assert pending_decisions == {"count": 0}
+
+
+def test_decide_relationship_rejects_claim_after_keep_history(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, _history_id = _seed_history_conflict(db_path)
+    keep_history_for_claim(
+        claim_id,
+        reason="Keep prior rejection",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with pytest.raises(ValueError, match="already finalized"):
+        decide_relationship(
+            claim_id,
+            action_type="confirm",
+            relation_type="trading_partner",
+            reason="Stale ordinary review should fail",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim_relationship_count = _fetch_one(
+        db_path,
+        """
+        SELECT COUNT(*) AS count
+        FROM curated_relationship
+        WHERE decision_source = ?
+        """,
+        (claim_id,),
+    )
+
+    assert claim_relationship_count == {"count": 0}
+
+
+def test_decide_relationship_rejects_claim_after_supersede(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, history_id = _seed_history_conflict(db_path)
+    existing = supersede_history_with_claim(
+        claim_id,
+        old_relationship_id=history_id,
+        relation_type="factory_node",
+        reason="New evidence supersedes old rejection",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    allowed_status_pattern = "candidate|pending_verify|history_conflict|history_matched"
+    with pytest.raises(ValueError, match=allowed_status_pattern):
+        decide_relationship(
+            claim_id,
+            action_type="confirm",
+            relation_type="trading_partner",
+            reason="Stale ordinary review should fail",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim_relationships = _fetch_all(
+        db_path,
+        """
+        SELECT relationship_id
+        FROM curated_relationship
+        WHERE decision_source = ?
+        """,
+        (claim_id,),
+    )
+
+    assert claim_relationships == [{"relationship_id": existing["relationship_id"]}]
+
+
 def test_keep_history_for_claim_rejects_verified_claim_after_supersede(tmp_path) -> None:
     db_path = tmp_path / "history-review.db"
     claim_id, history_id = _seed_history_conflict(db_path)
