@@ -326,6 +326,51 @@ def test_review_detail_summary_includes_entity_names() -> None:
     assert "2 orders" in summary
 
 
+def test_manual_review_context_is_name_first_without_primary_entity_ids() -> None:
+    summary = streamlit_app.format_manual_review_context(
+        {
+            "claim_id": "CLM_1",
+            "from_entity_id": "ENT_A",
+            "from_name": "ACME TRADING",
+            "to_entity_id": "ENT_B",
+            "to_name": "BETA FACTORY",
+            "candidate_relation_type": "trading_partner_candidate",
+            "history_context": {
+                "history_relationship_id": "REL_OLD",
+                "relation_type": "rejected_relation",
+                "status": "rejected",
+                "conflict_reason": "新证据与历史否定结论冲突",
+            },
+        }
+    )
+
+    assert "主体 A：ACME TRADING" in summary
+    assert "主体 B：BETA FACTORY" in summary
+    assert "新候选关系：trading_partner_candidate" in summary
+    assert "历史结论：rejected_relation / rejected" in summary
+    assert "冲突原因：" in summary
+    assert "ENT_A" not in summary
+    assert "ENT_B" not in summary
+
+
+def test_technical_identifier_summary_keeps_ids_secondary() -> None:
+    summary = streamlit_app.format_technical_identifier_summary(
+        {
+            "claim_id": "CLM_1",
+            "from_entity_id": "ENT_A",
+            "to_entity_id": "ENT_B",
+            "history_context": {
+                "history_relationship_id": "REL_OLD",
+            },
+        }
+    )
+
+    assert "CLM_1" in summary
+    assert "ENT_A" in summary
+    assert "ENT_B" in summary
+    assert "REL_OLD" in summary
+
+
 def test_entity_reference_summary_includes_name_when_available() -> None:
     assert (
         streamlit_app.format_entity_reference(

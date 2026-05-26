@@ -25,6 +25,9 @@ from trade_entity_graph.services.relationship_service import (
 from trade_entity_graph.services.review_service import (
     create_manual_relationship,
     decide_relationship,
+    keep_history_for_claim,
+    mark_claim_pending_verify,
+    supersede_history_with_claim,
 )
 
 TAB_LABELS = ["数据导入", "企业搜索", "关系图谱", "关系详情", "人工审核", "导出"]
@@ -229,6 +232,86 @@ def format_relationship_detail_summary(detail: dict[str, Any] | None) -> str:
     return (
         f"{relationship_id} | {from_entity} -> {to_entity} | "
         f"{relation_type} | {confidence} | {order_count} orders"
+    )
+
+
+def _history_context(detail: dict[str, Any]) -> dict[str, Any]:
+    context = detail.get("history_context")
+    return context if isinstance(context, dict) else {}
+
+
+def _history_relationship(context: dict[str, Any]) -> dict[str, Any]:
+    relationship = context.get("history_relationship")
+    return relationship if isinstance(relationship, dict) else {}
+
+
+def _history_relationship_id(context: dict[str, Any]) -> str:
+    relationship = _history_relationship(context)
+    return str(
+        context.get("history_relationship_id")
+        or relationship.get("relationship_id")
+        or "-"
+    )
+
+
+def format_manual_review_context(detail: dict[str, Any] | None) -> str:
+    """Return a business-facing review summary with names before IDs."""
+
+    if not detail:
+        return "未找到候选关系或最终关系，请检查 ID 是否正确。"
+
+    context = _history_context(detail)
+    history = _history_relationship(context)
+    relation_type = (
+        detail.get("candidate_relation_type") or detail.get("relation_type") or "-"
+    )
+    history_relation_type = (
+        context.get("relation_type") or history.get("relation_type") or "-"
+    )
+    history_status = (
+        context.get("status")
+        or context.get("relation_status")
+        or history.get("relation_status")
+        or "-"
+    )
+    conflict_reason = (
+        context.get("conflict_reason")
+        or context.get("reason")
+        or detail.get("recommendation_reason")
+        or "-"
+    )
+
+    lines = [
+        f"- 主体 A：{detail.get('from_name') or detail.get('source_label') or '-'}",
+        f"- 主体 B：{detail.get('to_name') or detail.get('target_label') or '-'}",
+        f"- 新候选关系：{relation_type}",
+    ]
+    if context:
+        lines.extend(
+            [
+                f"- 历史结论：{history_relation_type} / {history_status}",
+                f"- 冲突原因：{conflict_reason}",
+            ]
+        )
+    return "\n".join(lines)
+
+
+def format_technical_identifier_summary(detail: dict[str, Any] | None) -> str:
+    """Return secondary identifiers for debugging and traceability."""
+
+    if not detail:
+        return "无技术 ID。"
+
+    context = _history_context(detail)
+    identifiers = {
+        "claim_id": detail.get("claim_id"),
+        "relationship_id": detail.get("relationship_id") or detail.get("id"),
+        "from_entity_id": detail.get("from_entity_id") or detail.get("source"),
+        "to_entity_id": detail.get("to_entity_id") or detail.get("target"),
+        "history_relationship_id": _history_relationship_id(context) if context else None,
+    }
+    return "\n".join(
+        f"- {key}：{value}" for key, value in identifiers.items() if value
     )
 
 
@@ -542,59 +625,113 @@ def render_relationship_detail_tab() -> None:
 def render_review_tab() -> None:
     """Render manual review actions."""
 
-    st.subheader("人工审核")
+    st.subheader("\u4eba\u5de5\u5ba1\u6838")
     selected_claim_id = get_selected_claim_id()
     if selected_claim_id and REVIEW_CLAIM_WIDGET_KEY not in st.session_state:
         st.session_state[REVIEW_CLAIM_WIDGET_KEY] = selected_claim_id
-    claim_id = st.text_input("候选关系 ID", key=REVIEW_CLAIM_WIDGET_KEY)
+    claim_id = st.text_input("\u5019\u9009\u5173\u7cfb ID", key=REVIEW_CLAIM_WIDGET_KEY)
+    relationship_detail = None
     if claim_id:
         relationship_detail = get_relationship_detail(claim_id)
-        st.info(format_relationship_detail_summary(relationship_detail))
-    action_type = st.selectbox("审核动作", ["confirm", "reject", "modify"])
+        st.markdown(format_manual_review_context(relationship_detail))
+        with st.expander("\u67e5\u770b\u6280\u672f ID"):
+            st.markdown(format_technical_identifier_summary(relationship_detail))
+            st.json(relationship_detail)
+
+    history_context = (
+        relationship_detail.get("history_context") if relationship_detail else None
+    )
+    action_labels = {
+        "confirm": "\u786e\u8ba4\u5173\u7cfb",
+        "reject": "\u5426\u5b9a\u5173\u7cfb",
+        "modify": "\u4fee\u6539\u5173\u7cfb\u7c7b\u578b",
+        "keep_history": "\u6cbf\u7528\u5386\u53f2\u7ed3\u8bba",
+        "supersede_history": (
+            "\u63a5\u53d7\u65b0\u8bc1\u636e\uff0c"
+            "\u66ff\u4ee3\u5386\u53f2\u7ed3\u8bba"
+        ),
+        "mark_pending_verify": "\u6682\u4e0d\u5224\u65ad\uff0c\u6807\u8bb0\u5f85\u9a8c\u8bc1",
+    }
+    action_options = (
+        ["keep_history", "supersede_history", "mark_pending_verify"]
+        if history_context
+        else ["confirm", "reject", "modify"]
+    )
+    action_type = st.selectbox(
+        "\u5ba1\u6838\u52a8\u4f5c",
+        action_options,
+        format_func=lambda action: action_labels.get(action, action),
+    )
     default_relation_type = (
         "rejected_relation" if action_type == "reject" else DEFAULT_RELATION_TYPE
     )
-    relation_type = st.selectbox(
-        "关系类型",
-        RELATION_TYPE_OPTIONS,
-        index=_relation_type_index(default_relation_type),
-        format_func=format_relation_type_option,
-    )
-    reason = st.text_area("判断理由")
-    operator = st.text_input("操作人", value="local_user")
-    if st.button("提交审核") and claim_id:
-        st.json(
-            decide_relationship(
+    relation_type = None
+    if action_type in {"confirm", "modify", "reject", "supersede_history"}:
+        relation_type = st.selectbox(
+            "\u5173\u7cfb\u7c7b\u578b",
+            RELATION_TYPE_OPTIONS,
+            index=_relation_type_index(default_relation_type),
+            format_func=format_relation_type_option,
+        )
+    reason = st.text_area("\u5224\u65ad\u7406\u7531")
+    operator = st.text_input("\u64cd\u4f5c\u4eba", value="local_user")
+    if st.button("\u63d0\u4ea4\u5ba1\u6838") and claim_id:
+        if action_type == "keep_history":
+            result = keep_history_for_claim(
                 claim_id,
-                action_type=action_type,
-                relation_type=relation_type,
                 reason=reason,
                 operator=operator,
             )
-        )
+        elif action_type == "mark_pending_verify":
+            result = mark_claim_pending_verify(
+                claim_id,
+                reason=reason,
+                operator=operator,
+            )
+        elif action_type == "supersede_history":
+            result = supersede_history_with_claim(
+                claim_id,
+                old_relationship_id=(
+                    _history_relationship_id(history_context)
+                    if isinstance(history_context, dict)
+                    else None
+                ),
+                relation_type=relation_type or DEFAULT_RELATION_TYPE,
+                reason=reason,
+                operator=operator,
+            )
+        else:
+            result = decide_relationship(
+                claim_id,
+                action_type=action_type,
+                relation_type=relation_type or default_relation_type,
+                reason=reason,
+                operator=operator,
+            )
+        st.json(result)
 
     st.divider()
-    st.subheader("人工新增关系")
-    from_entity_id = st.text_input("起点企业 ID")
-    to_entity_id = st.text_input("终点企业 ID")
+    st.subheader("\u4eba\u5de5\u65b0\u589e\u5173\u7cfb")
+    from_entity_id = st.text_input("\u8d77\u70b9\u4f01\u4e1a ID")
+    to_entity_id = st.text_input("\u7ec8\u70b9\u4f01\u4e1a ID")
     if from_entity_id:
         from_entity_label = format_entity_reference(
             get_entity_detail(from_entity_id), fallback_id=from_entity_id
         )
-        st.caption(f"起点企业：{from_entity_label}")
+        st.caption(f"\u8d77\u70b9\u4f01\u4e1a\uff1a{from_entity_label}")
     if to_entity_id:
         to_entity_label = format_entity_reference(
             get_entity_detail(to_entity_id), fallback_id=to_entity_id
         )
-        st.caption(f"终点企业：{to_entity_label}")
+        st.caption(f"\u7ec8\u70b9\u4f01\u4e1a\uff1a{to_entity_label}")
     manual_relation_type = st.selectbox(
-        "人工关系类型",
+        "\u4eba\u5de5\u5173\u7cfb\u7c7b\u578b",
         RELATION_TYPE_OPTIONS,
         index=_relation_type_index(DEFAULT_RELATION_TYPE),
         format_func=format_relation_type_option,
     )
-    manual_reason = st.text_area("人工新增理由")
-    if st.button("创建人工关系") and from_entity_id and to_entity_id:
+    manual_reason = st.text_area("\u4eba\u5de5\u65b0\u589e\u7406\u7531")
+    if st.button("\u521b\u5efa\u4eba\u5de5\u5173\u7cfb") and from_entity_id and to_entity_id:
         st.json(
             create_manual_relationship(
                 from_entity_id,
