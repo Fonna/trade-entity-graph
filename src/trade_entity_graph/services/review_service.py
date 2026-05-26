@@ -10,6 +10,7 @@ from trade_entity_graph.services.history_reuse_service import get_history_contex
 from trade_entity_graph.utils.ids import new_id
 
 CURRENT_EFFECTIVE_STATUSES = ("verified", "manual_only", "rejected")
+SUPERSEDE_CLAIM_STATUSES = ("history_conflict",)
 
 
 def _write_decision_and_audit(
@@ -169,6 +170,11 @@ def _fetch_current_effective_history_for_claim(
     return dict(relationship)
 
 
+def _validate_supersede_claim_state(claim: dict[str, Any]) -> None:
+    if claim["relation_status"] not in SUPERSEDE_CLAIM_STATUSES:
+        raise ValueError("Claim must be in history_conflict status to supersede history")
+
+
 def _resolve_history_relationship_id(
     claim_id: str,
     *,
@@ -310,6 +316,7 @@ def supersede_history_with_claim(
     relationship_id = new_id("REL")
     with get_connection(db_path) as connection:
         claim = _fetch_claim_or_raise(connection, claim_id)
+        _validate_supersede_claim_state(claim)
         history_relationship_id = _resolve_history_relationship_id(
             claim_id,
             old_relationship_id=old_relationship_id,
@@ -320,16 +327,30 @@ def supersede_history_with_claim(
             claim=claim,
             relationship_id=history_relationship_id,
         )
-        connection.execute(
-            """
+        status_placeholders = ", ".join("?" for _ in CURRENT_EFFECTIVE_STATUSES)
+        cursor = connection.execute(
+            f"""
             UPDATE curated_relationship
             SET relation_status = 'deprecated',
                 valid_to = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE relationship_id = ?
+              AND relation_status IN ({status_placeholders})
+              AND valid_to IS NULL
+              AND from_entity_id = ?
+              AND to_entity_id = ?
             """,
-            (history_relationship_id,),
+            (
+                history_relationship_id,
+                *CURRENT_EFFECTIVE_STATUSES,
+                claim["from_entity_id"],
+                claim["to_entity_id"],
+            ),
         )
+        if cursor.rowcount != 1:
+            raise ValueError(
+                "Superseded relationship must be current-effective and match the claim pair"
+            )
         connection.execute(
             """
             INSERT INTO audit_log (

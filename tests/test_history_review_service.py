@@ -272,7 +272,7 @@ def test_supersede_history_with_claim_rejects_unrelated_old_relationship(tmp_pat
         )
         connection.commit()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="current-effective and match the claim pair"):
         supersede_history_with_claim(
             claim_id,
             old_relationship_id=unrelated_id,
@@ -317,7 +317,7 @@ def test_supersede_history_with_claim_rejects_deprecated_old_relationship(tmp_pa
         )
         connection.commit()
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="current-effective and match the claim pair"):
         supersede_history_with_claim(
             claim_id,
             old_relationship_id=deprecated_id,
@@ -346,6 +346,54 @@ def test_supersede_history_with_claim_rejects_deprecated_old_relationship(tmp_pa
         "valid_to": "2026-05-01 00:00:00",
     }
     assert relationship_count == {"count": 2}
+
+
+def test_supersede_history_with_claim_cannot_be_repeated_for_verified_claim(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, history_id = _seed_history_conflict(db_path)
+    first = supersede_history_with_claim(
+        claim_id,
+        old_relationship_id=history_id,
+        relation_type="factory_node",
+        reason="New evidence supersedes old rejection",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with pytest.raises(ValueError, match="history_conflict"):
+        supersede_history_with_claim(
+            claim_id,
+            relation_type="sales_center",
+            reason="Repeated supersede should not create a chain",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    verified_replacements = _fetch_all(
+        db_path,
+        """
+        SELECT relationship_id, supersedes_relationship_id
+        FROM curated_relationship
+        WHERE relation_status = 'verified'
+        """,
+    )
+    chained_replacements = _fetch_all(
+        db_path,
+        """
+        SELECT relationship_id
+        FROM curated_relationship
+        WHERE supersedes_relationship_id = ?
+        """,
+        (first["relationship_id"],),
+    )
+
+    assert verified_replacements == [
+        {
+            "relationship_id": first["relationship_id"],
+            "supersedes_relationship_id": history_id,
+        }
+    ]
+    assert chained_replacements == []
 
 
 def test_keep_history_for_claim_unknown_claim_raises_unknown_claim_error(tmp_path) -> None:
