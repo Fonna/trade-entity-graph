@@ -207,12 +207,13 @@ def aggregate_relationship_claims(
         return {"claim_count": claim_count}
 
 
-def _has_review_artifacts(connection, claim_id: str) -> bool:
+def _has_final_review_artifacts(connection, claim_id: str) -> bool:
     row = connection.execute(
         """
         SELECT 1
         FROM relationship_decision
         WHERE claim_id = ?
+          AND action_type IN ('confirm', 'modify', 'reject', 'keep_history', 'supersede')
         UNION
         SELECT 1
         FROM curated_relationship
@@ -263,7 +264,7 @@ def get_relationship_detail(
         detail["history_context"] = None
         if (
             detail["relation_status"] in REVIEWABLE_DETAIL_CLAIM_STATUSES
-            and not _has_review_artifacts(connection, relationship_id)
+            and not _has_final_review_artifacts(connection, relationship_id)
         ):
             detail["history_context"] = get_history_context_for_claim(
                 relationship_id, db_path=db_path

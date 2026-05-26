@@ -258,6 +258,90 @@ def test_relationship_api_returns_history_context_and_keeps_history(
     assert duplicate_payload["detail"]
 
 
+def test_relationship_api_confirm_rejects_history_conflict_claim(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-history-confirm.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_HISTORY_CONFIRM', 'api-history-confirm.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_API_CONFIRM_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_API_CONFIRM_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id, from_entity_id, to_entity_id, relation_type,
+                relation_status, source_type, decision_note, verified_by, verified_at
+            )
+            VALUES (
+                'REL_API_CONFIRM_HISTORY', 'ENT_API_CONFIRM_FROM',
+                'ENT_API_CONFIRM_TO', 'trading_partner', 'rejected', 'manual',
+                'Historical rejection', 'reviewer', CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_API_CONFIRM_CONFLICT', 'ENT_API_CONFIRM_FROM',
+                'ENT_API_CONFIRM_TO', 'trading_partner_candidate',
+                'history_conflict', 'high', 0.88, 5, 21.5,
+                '5 orders, 21.5 TEU', 'RUN_API_HISTORY_CONFIRM'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_API_CONFIRM_CONFLICT/decision",
+        json_body={
+            "action_type": "confirm",
+            "relation_type": "trading_partner",
+            "reason": "Ordinary confirm should not bypass supersede",
+            "operator": "tester",
+        },
+    )
+
+    assert 400 <= status < 500
+    assert payload["detail"]
+    with get_connection(db_path) as connection:
+        claim_relationship_count = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM curated_relationship
+            WHERE decision_source = 'CLM_API_CONFIRM_CONFLICT'
+            """
+        ).fetchone()["count"]
+    assert claim_relationship_count == 0
+
+
 def test_relationship_api_invalid_action_type_returns_json_4xx(
     tmp_path, monkeypatch
 ) -> None:

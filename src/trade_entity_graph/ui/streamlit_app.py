@@ -16,6 +16,7 @@ from trade_entity_graph.importers.pipeline import run_import
 from trade_entity_graph.services.entity_service import get_entity_detail, search_entities
 from trade_entity_graph.services.export_service import export_relationship_rows
 from trade_entity_graph.services.graph_service import get_ego_graph
+from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
 from trade_entity_graph.services.relationship_service import (
     aggregate_relationship_claims,
     generate_order_role_edges,
@@ -565,12 +566,23 @@ def render_import_tab() -> None:
             )
         )
         edge_result = generate_order_role_edges(run_id=result.run_id)
-        claim_result = aggregate_relationship_claims(run_id=result.run_id)
+        edge_count = edge_result.get("edge_count", 0)
+        history_reuse = {"history_matched": 0, "history_conflict": 0, "unchanged": 0}
+        if edge_count > 0:
+            claim_result = aggregate_relationship_claims(run_id=result.run_id)
+            history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
+        elif result.claim_count > 0:
+            claim_result = {"claim_count": result.claim_count}
+            history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
+        else:
+            claim_result = {"claim_count": 0}
         st.success(f"导入完成，批次号：{result.run_id}")
         if result.archived_files:
             st.info(f"原始文件已归档到 data/raw/imports/{result.run_id}/")
             st.dataframe(result.archived_files)
-        st.json({**result.__dict__, **edge_result, **claim_result})
+        st.json(
+            {**result.__dict__, **edge_result, **claim_result, "history_reuse": history_reuse}
+        )
 
 
 def render_search_tab() -> None:

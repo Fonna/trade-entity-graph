@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from trade_entity_graph.ui import streamlit_app
 
 
@@ -301,6 +303,92 @@ def test_final_relation_type_for_candidate_maps_known_candidate_types() -> None:
         streamlit_app.final_relation_type_for_candidate("unexpected_candidate")
         == streamlit_app.DEFAULT_RELATION_TYPE
     )
+
+
+def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) -> None:
+    class FakeStreamlit:
+        def __init__(self) -> None:
+            self.json_payloads: list[dict] = []
+
+        def subheader(self, *_args, **_kwargs) -> None:
+            return None
+
+        def text_input(self, _label, value="", **_kwargs) -> str:
+            return value
+
+        def button(self, *_args, **_kwargs) -> bool:
+            return True
+
+        def success(self, *_args, **_kwargs) -> None:
+            return None
+
+        def info(self, *_args, **_kwargs) -> None:
+            return None
+
+        def dataframe(self, *_args, **_kwargs) -> None:
+            return None
+
+        def json(self, payload, **_kwargs) -> None:
+            self.json_payloads.append(payload)
+
+    calls: list[tuple[str, str]] = []
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "run_import",
+        lambda _inputs: SimpleNamespace(
+            run_id="RUN_STREAMLIT_IMPORT",
+            entity_count=2,
+            alias_count=0,
+            evidence_count=1,
+            claim_count=0,
+            skipped_rows=[],
+            archived_files=[],
+        ),
+    )
+
+    def fake_generate_order_role_edges(*, run_id):
+        calls.append(("generate", run_id))
+        return {"edge_count": 1, "skipped_count": 0}
+
+    def fake_aggregate_relationship_claims(*, run_id):
+        calls.append(("aggregate", run_id))
+        return {"claim_count": 1}
+
+    def fake_apply_history_reuse_to_claims(*, run_id):
+        calls.append(("history", run_id))
+        return {"history_matched": 0, "history_conflict": 1, "unchanged": 0}
+
+    monkeypatch.setattr(
+        streamlit_app,
+        "generate_order_role_edges",
+        fake_generate_order_role_edges,
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "aggregate_relationship_claims",
+        fake_aggregate_relationship_claims,
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "apply_history_reuse_to_claims",
+        fake_apply_history_reuse_to_claims,
+        raising=False,
+    )
+
+    streamlit_app.render_import_tab()
+
+    assert calls == [
+        ("generate", "RUN_STREAMLIT_IMPORT"),
+        ("aggregate", "RUN_STREAMLIT_IMPORT"),
+        ("history", "RUN_STREAMLIT_IMPORT"),
+    ]
+    assert fake_st.json_payloads[0]["history_reuse"] == {
+        "history_matched": 0,
+        "history_conflict": 1,
+        "unchanged": 0,
+    }
 
 def test_review_tab_uses_relation_type_selectboxes(monkeypatch) -> None:
     class FakeStreamlit:
