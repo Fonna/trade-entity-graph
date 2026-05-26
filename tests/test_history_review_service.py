@@ -55,6 +55,7 @@ def _insert_history(
     from_entity_id: str,
     to_entity_id: str,
     *,
+    relation_type: str = "trading_partner",
     relation_status: str,
     valid_to: str | None = None,
 ) -> str:
@@ -65,10 +66,17 @@ def _insert_history(
             relationship_id, from_entity_id, to_entity_id, relation_type,
             relation_status, source_type, decision_note, verified_by, verified_at, valid_to
         )
-        VALUES (?, ?, ?, 'trading_partner', ?, 'manual',
+        VALUES (?, ?, ?, ?, ?, 'manual',
                 'Historical relationship', 'reviewer', CURRENT_TIMESTAMP, ?)
         """,
-        (relationship_id, from_entity_id, to_entity_id, relation_status, valid_to),
+        (
+            relationship_id,
+            from_entity_id,
+            to_entity_id,
+            relation_type,
+            relation_status,
+            valid_to,
+        ),
     )
     return relationship_id
 
@@ -210,8 +218,10 @@ def test_supersede_history_with_claim_deprecates_old_and_creates_verified_relati
     assert len(new_relationships) == 1
     assert new_relationships[0]["relation_status"] == "verified"
     assert new_relationships[0]["relation_type"] == "factory_node"
-    assert decisions[-1]["action_type"] == "supersede"
-    assert decisions[-1]["relationship_id"] == new_relationships[0]["relationship_id"]
+    supersede_decision = next(
+        decision for decision in decisions if decision["action_type"] == "supersede"
+    )
+    assert supersede_decision["relationship_id"] == new_relationships[0]["relationship_id"]
     assert (history_id, "deprecated") in {
         (audit["object_id"], audit["action_type"]) for audit in relationship_audits
     }
@@ -394,6 +404,75 @@ def test_supersede_history_with_claim_cannot_be_repeated_for_verified_claim(tmp_
         }
     ]
     assert chained_replacements == []
+
+
+def test_supersede_history_with_claim_accepts_reversed_symmetric_history(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        _insert_batch(connection)
+        acme = _insert_entity(connection, "ACME TRADING")
+        beta = _insert_entity(connection, "BETA FACTORY")
+        claim_id = _insert_high_confidence_claim(connection, acme, beta)
+        history_id = _insert_history(
+            connection,
+            beta,
+            acme,
+            relation_type="trading_partner",
+            relation_status="rejected",
+        )
+        connection.commit()
+
+    result = apply_history_reuse_to_claims(run_id="RUN_HISTORY_REVIEW", db_path=db_path)
+    claim = _fetch_one(
+        db_path,
+        """
+        SELECT from_entity_id, to_entity_id, relation_status
+        FROM relationship_claim
+        WHERE claim_id = ?
+        """,
+        (claim_id,),
+    )
+
+    assert result == {"history_matched": 0, "history_conflict": 1, "unchanged": 0}
+    assert claim["relation_status"] == "history_conflict"
+
+    replacement = supersede_history_with_claim(
+        claim_id,
+        old_relationship_id=history_id,
+        relation_type="trading_partner",
+        reason="Reversed symmetric history is superseded by new evidence",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    old_relationship = _fetch_one(
+        db_path,
+        """
+        SELECT relation_status, valid_to
+        FROM curated_relationship
+        WHERE relationship_id = ?
+        """,
+        (history_id,),
+    )
+    new_relationship = _fetch_one(
+        db_path,
+        """
+        SELECT from_entity_id, to_entity_id, relation_status, supersedes_relationship_id
+        FROM curated_relationship
+        WHERE relationship_id = ?
+        """,
+        (replacement["relationship_id"],),
+    )
+
+    assert old_relationship["relation_status"] == "deprecated"
+    assert old_relationship["valid_to"] is not None
+    assert new_relationship == {
+        "from_entity_id": claim["from_entity_id"],
+        "to_entity_id": claim["to_entity_id"],
+        "relation_status": "verified",
+        "supersedes_relationship_id": history_id,
+    }
 
 
 def test_keep_history_for_claim_unknown_claim_raises_unknown_claim_error(tmp_path) -> None:

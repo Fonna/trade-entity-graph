@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from trade_entity_graph.db.connection import get_connection
-from trade_entity_graph.services.history_reuse_service import get_history_context_for_claim
+from trade_entity_graph.services.history_reuse_service import (
+    SYMMETRIC_RELATION_TYPES,
+    get_history_context_for_claim,
+)
 from trade_entity_graph.utils.ids import new_id
 
 CURRENT_EFFECTIVE_STATUSES = ("verified", "manual_only", "rejected")
@@ -146,6 +149,7 @@ def _fetch_current_effective_history_for_claim(
     relationship_id: str,
 ) -> dict[str, Any]:
     status_placeholders = ", ".join("?" for _ in CURRENT_EFFECTIVE_STATUSES)
+    symmetric_placeholders = ", ".join("?" for _ in SYMMETRIC_RELATION_TYPES)
     relationship = connection.execute(
         f"""
         SELECT *
@@ -153,14 +157,23 @@ def _fetch_current_effective_history_for_claim(
         WHERE relationship_id = ?
           AND relation_status IN ({status_placeholders})
           AND valid_to IS NULL
-          AND from_entity_id = ?
-          AND to_entity_id = ?
+          AND (
+              (from_entity_id = ? AND to_entity_id = ?)
+              OR (
+                  from_entity_id = ?
+                  AND to_entity_id = ?
+                  AND relation_type IN ({symmetric_placeholders})
+              )
+          )
         """,
         (
             relationship_id,
             *CURRENT_EFFECTIVE_STATUSES,
             claim["from_entity_id"],
             claim["to_entity_id"],
+            claim["to_entity_id"],
+            claim["from_entity_id"],
+            *sorted(SYMMETRIC_RELATION_TYPES),
         ),
     ).fetchone()
     if not relationship:
@@ -328,6 +341,7 @@ def supersede_history_with_claim(
             relationship_id=history_relationship_id,
         )
         status_placeholders = ", ".join("?" for _ in CURRENT_EFFECTIVE_STATUSES)
+        symmetric_placeholders = ", ".join("?" for _ in SYMMETRIC_RELATION_TYPES)
         cursor = connection.execute(
             f"""
             UPDATE curated_relationship
@@ -337,14 +351,23 @@ def supersede_history_with_claim(
             WHERE relationship_id = ?
               AND relation_status IN ({status_placeholders})
               AND valid_to IS NULL
-              AND from_entity_id = ?
-              AND to_entity_id = ?
+              AND (
+                  (from_entity_id = ? AND to_entity_id = ?)
+                  OR (
+                      from_entity_id = ?
+                      AND to_entity_id = ?
+                      AND relation_type IN ({symmetric_placeholders})
+                  )
+              )
             """,
             (
                 history_relationship_id,
                 *CURRENT_EFFECTIVE_STATUSES,
                 claim["from_entity_id"],
                 claim["to_entity_id"],
+                claim["to_entity_id"],
+                claim["from_entity_id"],
+                *sorted(SYMMETRIC_RELATION_TYPES),
             ),
         )
         if cursor.rowcount != 1:
