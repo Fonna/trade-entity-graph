@@ -13,6 +13,8 @@ from trade_entity_graph.services.history_reuse_service import (
 from trade_entity_graph.utils.ids import new_id
 
 CURRENT_EFFECTIVE_STATUSES = ("verified", "manual_only", "rejected")
+KEEP_HISTORY_CLAIM_STATUSES = ("history_conflict", "pending_verify")
+MARK_PENDING_CLAIM_STATUSES = ("candidate", "history_conflict", "history_matched")
 SUPERSEDE_CLAIM_STATUSES = ("history_conflict",)
 
 
@@ -188,6 +190,17 @@ def _validate_supersede_claim_state(claim: dict[str, Any]) -> None:
         raise ValueError("Claim must be in history_conflict status to supersede history")
 
 
+def _validate_claim_state(
+    claim: dict[str, Any],
+    *,
+    allowed_statuses: tuple[str, ...],
+    action: str,
+) -> None:
+    if claim["relation_status"] not in allowed_statuses:
+        allowed = ", ".join(allowed_statuses)
+        raise ValueError(f"Claim must be in one of ({allowed}) to {action}")
+
+
 def _resolve_history_relationship_id(
     claim_id: str,
     *,
@@ -282,6 +295,11 @@ def keep_history_for_claim(
 
     with get_connection(db_path) as connection:
         claim = _fetch_claim_or_raise(connection, claim_id)
+        _validate_claim_state(
+            claim,
+            allowed_statuses=KEEP_HISTORY_CLAIM_STATUSES,
+            action="keep history",
+        )
         history_relationship_id = _resolve_history_relationship_id(
             claim_id,
             old_relationship_id=None,
@@ -289,14 +307,18 @@ def keep_history_for_claim(
         )
         history = _fetch_relationship_or_raise(connection, history_relationship_id)
         after_status = "history_matched"
-        connection.execute(
-            """
+        status_placeholders = ", ".join("?" for _ in KEEP_HISTORY_CLAIM_STATUSES)
+        cursor = connection.execute(
+            f"""
             UPDATE relationship_claim
             SET relation_status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE claim_id = ?
+              AND relation_status IN ({status_placeholders})
             """,
-            (after_status, claim_id),
+            (after_status, claim_id, *KEEP_HISTORY_CLAIM_STATUSES),
         )
+        if cursor.rowcount != 1:
+            raise ValueError("Claim must be in an allowed state to keep history")
         _write_claim_decision_and_audit(
             connection,
             claim=claim,
@@ -472,15 +494,24 @@ def mark_claim_pending_verify(
 
     with get_connection(db_path) as connection:
         claim = _fetch_claim_or_raise(connection, claim_id)
+        _validate_claim_state(
+            claim,
+            allowed_statuses=MARK_PENDING_CLAIM_STATUSES,
+            action="mark pending verify",
+        )
         after_status = "pending_verify"
-        connection.execute(
-            """
+        status_placeholders = ", ".join("?" for _ in MARK_PENDING_CLAIM_STATUSES)
+        cursor = connection.execute(
+            f"""
             UPDATE relationship_claim
             SET relation_status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE claim_id = ?
+              AND relation_status IN ({status_placeholders})
             """,
-            (after_status, claim_id),
+            (after_status, claim_id, *MARK_PENDING_CLAIM_STATUSES),
         )
+        if cursor.rowcount != 1:
+            raise ValueError("Claim must be in an allowed state to mark pending verify")
         _write_claim_decision_and_audit(
             connection,
             claim=claim,

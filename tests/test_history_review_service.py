@@ -406,6 +406,64 @@ def test_supersede_history_with_claim_cannot_be_repeated_for_verified_claim(tmp_
     assert chained_replacements == []
 
 
+def test_keep_history_for_claim_rejects_verified_claim_after_supersede(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, history_id = _seed_history_conflict(db_path)
+    supersede_history_with_claim(
+        claim_id,
+        old_relationship_id=history_id,
+        relation_type="factory_node",
+        reason="New evidence supersedes old rejection",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with pytest.raises(ValueError, match="history_conflict|pending_verify"):
+        keep_history_for_claim(
+            claim_id,
+            reason="Should not regress finalized claim",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim = _fetch_one(
+        db_path,
+        "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+
+    assert claim == {"relation_status": "verified"}
+
+
+def test_mark_claim_pending_verify_rejects_verified_claim_after_supersede(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, history_id = _seed_history_conflict(db_path)
+    supersede_history_with_claim(
+        claim_id,
+        old_relationship_id=history_id,
+        relation_type="factory_node",
+        reason="New evidence supersedes old rejection",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with pytest.raises(ValueError, match="candidate|history_conflict|history_matched"):
+        mark_claim_pending_verify(
+            claim_id,
+            reason="Should not regress finalized claim",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim = _fetch_one(
+        db_path,
+        "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+
+    assert claim == {"relation_status": "verified"}
+
+
 def test_supersede_history_with_claim_accepts_reversed_symmetric_history(tmp_path) -> None:
     db_path = tmp_path / "history-review.db"
     initialize_database(db_path)
