@@ -258,6 +258,102 @@ def test_relationship_api_returns_history_context_and_keeps_history(
     assert duplicate_payload["detail"]
 
 
+def test_relationship_api_keeps_history_matched_claim(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-history-matched.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_HISTORY_MATCHED', 'api-history-matched.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_API_MATCHED_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_API_MATCHED_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id, from_entity_id, to_entity_id, relation_type,
+                relation_status, source_type, decision_note, verified_by, verified_at
+            )
+            VALUES (
+                'REL_API_MATCHED_HISTORY', 'ENT_API_MATCHED_FROM',
+                'ENT_API_MATCHED_TO', 'trading_partner', 'verified', 'manual',
+                'Historical verified relationship', 'reviewer', CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_API_MATCHED', 'ENT_API_MATCHED_FROM', 'ENT_API_MATCHED_TO',
+                'trading_partner_candidate', 'history_matched', 'high', 0.88,
+                5, 21.5, 'history reuse: compatible historical relationship',
+                'RUN_API_HISTORY_MATCHED'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, relationship_payload = _request(app, "GET", "/relationships/CLM_API_MATCHED")
+    assert status == 200
+    assert relationship_payload["relation_status"] == "history_matched"
+    assert relationship_payload["history_context"]["history_relationship"][
+        "relationship_id"
+    ] == "REL_API_MATCHED_HISTORY"
+
+    status, decision_payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_API_MATCHED/decision",
+        json_body={
+            "action_type": "keep_history",
+            "reason": "Keep compatible history",
+            "operator": "tester",
+        },
+    )
+    assert status == 200
+    assert decision_payload["relation_status"] == "history_matched"
+    assert decision_payload["history_relationship_id"] == "REL_API_MATCHED_HISTORY"
+
+    with get_connection(db_path) as connection:
+        decisions = connection.execute(
+            """
+            SELECT action_type, relationship_id
+            FROM relationship_decision
+            WHERE claim_id = 'CLM_API_MATCHED'
+            """
+        ).fetchall()
+        relationship_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM curated_relationship"
+        ).fetchone()
+
+    assert [dict(decision) for decision in decisions] == [
+        {"action_type": "keep_history", "relationship_id": "REL_API_MATCHED_HISTORY"}
+    ]
+    assert relationship_count["count"] == 1
+
+
 def test_relationship_api_confirm_rejects_history_conflict_claim(
     tmp_path, monkeypatch
 ) -> None:

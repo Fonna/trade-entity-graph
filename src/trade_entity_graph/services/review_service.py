@@ -15,7 +15,7 @@ from trade_entity_graph.services.history_reuse_service import (
 from trade_entity_graph.utils.ids import new_id
 
 CURRENT_EFFECTIVE_STATUSES = ("verified", "manual_only", "rejected")
-KEEP_HISTORY_CLAIM_STATUSES = ("history_conflict", "pending_verify")
+KEEP_HISTORY_CLAIM_STATUSES = ("history_conflict", "pending_verify", "history_matched")
 MARK_PENDING_CLAIM_STATUSES = ("candidate", "history_conflict", "history_matched")
 ORDINARY_DECISION_CLAIM_STATUSES = ("candidate",)
 SUPERSEDE_CLAIM_STATUSES = ("history_conflict", "pending_verify")

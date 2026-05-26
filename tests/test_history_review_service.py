@@ -385,6 +385,68 @@ def test_keep_history_for_claim_reuses_history_without_duplicate_relationship(tm
     assert [audit["action_type"] for audit in claim_audits] == ["keep_history"]
 
 
+def test_keep_history_for_claim_accepts_history_matched_claim(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        _insert_batch(connection)
+        acme = _insert_entity(connection, "ACME TRADING")
+        beta = _insert_entity(connection, "BETA FACTORY")
+        claim_id = _insert_high_confidence_claim(connection, acme, beta)
+        history_id = _insert_history(
+            connection,
+            acme,
+            beta,
+            relation_status="verified",
+        )
+        connection.commit()
+
+    reuse_result = apply_history_reuse_to_claims(
+        run_id="RUN_HISTORY_REVIEW",
+        db_path=db_path,
+    )
+    result = keep_history_for_claim(
+        claim_id,
+        reason="Keep compatible verified history",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with pytest.raises(ValueError, match="already finalized|unfinalized"):
+        keep_history_for_claim(
+            claim_id,
+            reason="Duplicate keep history",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim = _fetch_one(
+        db_path,
+        "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+    decisions = _fetch_all(
+        db_path,
+        """
+        SELECT action_type, relationship_id
+        FROM relationship_decision
+        WHERE claim_id = ?
+        """,
+        (claim_id,),
+    )
+    relationship_count = _fetch_one(
+        db_path,
+        "SELECT COUNT(*) AS count FROM curated_relationship",
+    )
+
+    assert reuse_result == {"history_matched": 1, "history_conflict": 0, "unchanged": 0}
+    assert result["relation_status"] == "history_matched"
+    assert result["history_relationship_id"] == history_id
+    assert claim == {"relation_status": "history_matched"}
+    assert decisions == [{"action_type": "keep_history", "relationship_id": history_id}]
+    assert relationship_count == {"count": 1}
+
+
 def test_supersede_history_with_claim_deprecates_old_and_creates_verified_relationship(
     tmp_path,
 ) -> None:
