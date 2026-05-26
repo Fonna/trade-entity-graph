@@ -377,6 +377,216 @@ def test_relationship_api_supersede_history_requires_relation_type(
     assert payload["detail"]
 
 
+def test_relationship_api_mark_pending_verify_updates_claim(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-mark-pending.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_PENDING', 'api-pending.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_PENDING_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_PENDING_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_PENDING_ROUTE', 'ENT_PENDING_FROM', 'ENT_PENDING_TO',
+                'trading_partner_candidate', 'candidate', 'medium', 0.55,
+                3, 12.5, '3 orders, 12.5 TEU', 'RUN_API_PENDING'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_PENDING_ROUTE/decision",
+        json_body={
+            "action_type": "mark_pending_verify",
+            "reason": "Needs manual verification",
+            "operator": "tester",
+        },
+    )
+    assert status == 200
+    assert payload["relation_status"] == "pending_verify"
+
+    with get_connection(db_path) as connection:
+        stored_status = connection.execute(
+            "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+            ("CLM_PENDING_ROUTE",),
+        ).fetchone()["relation_status"]
+    assert stored_status == "pending_verify"
+
+
+def test_relationship_api_supersede_history_deprecates_old_relationship(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-supersede-success.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_SUPERSEDE_OK', 'api-supersede-ok.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_SUP_OK_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_SUP_OK_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id, from_entity_id, to_entity_id, relation_type,
+                relation_status, source_type, decision_note, verified_by, verified_at
+            )
+            VALUES (
+                'REL_SUPERSEDED_ROUTE', 'ENT_SUP_OK_FROM', 'ENT_SUP_OK_TO',
+                'trading_partner', 'rejected', 'manual', 'Historical rejection',
+                'reviewer', CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_SUPERSEDE_ROUTE', 'ENT_SUP_OK_FROM', 'ENT_SUP_OK_TO',
+                'trading_partner_candidate', 'history_conflict', 'high', 0.88,
+                5, 21.5, '5 orders, 21.5 TEU', 'RUN_API_SUPERSEDE_OK'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_SUPERSEDE_ROUTE/decision",
+        json_body={
+            "action_type": "supersede_history",
+            "old_relationship_id": "REL_SUPERSEDED_ROUTE",
+            "relation_type": "trading_partner",
+            "reason": "New evidence supersedes history",
+            "operator": "tester",
+        },
+    )
+    assert status == 200
+    assert payload["relation_status"] == "verified"
+    assert payload["supersedes_relationship_id"] == "REL_SUPERSEDED_ROUTE"
+
+    with get_connection(db_path) as connection:
+        old_relationship = connection.execute(
+            """
+            SELECT relation_status, valid_to
+            FROM curated_relationship
+            WHERE relationship_id = ?
+            """,
+            ("REL_SUPERSEDED_ROUTE",),
+        ).fetchone()
+    assert old_relationship["relation_status"] == "deprecated"
+    assert old_relationship["valid_to"] is not None
+
+
+def test_relationship_api_ordinary_decision_requires_relation_type(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-confirm-validation.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_CONFIRM_VALIDATION', 'api-confirm.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_CONFIRM_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_CONFIRM_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_CONFIRM_NEEDS_TYPE', 'ENT_CONFIRM_FROM', 'ENT_CONFIRM_TO',
+                'trading_partner_candidate', 'candidate', 'medium', 0.55,
+                3, 12.5, '3 orders, 12.5 TEU', 'RUN_API_CONFIRM_VALIDATION'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_CONFIRM_NEEDS_TYPE/decision",
+        json_body={
+            "action_type": "confirm",
+            "reason": "Missing relation type",
+            "operator": "tester",
+        },
+    )
+    assert status == 422
+    assert payload["detail"]
+
+
 def test_import_endpoint_applies_history_reuse_to_imported_claims_without_aggregation(
     monkeypatch,
 ) -> None:
