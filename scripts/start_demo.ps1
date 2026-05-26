@@ -73,11 +73,76 @@ function Test-TcpPort {
     }
 }
 
+function Get-ProcessTreeIds {
+    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+
+    $ids = @($RootProcessId)
+    $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $RootProcessId" `
+        -ErrorAction SilentlyContinue
+    foreach ($child in $children) {
+        $ids += Get-ProcessTreeIds -RootProcessId ([int]$child.ProcessId)
+    }
+
+    return $ids
+}
+
+function Test-ExpectedPythonCommand {
+    param(
+        [Parameter(Mandatory = $true)]$ProcessInfo,
+        [Parameter(Mandatory = $true)][string[]]$ExpectedCommandFragments
+    )
+
+    $executableName = Split-Path -Leaf ([string]$ProcessInfo.ExecutablePath)
+    if ($executableName -notin @("python.exe", "pythonw.exe")) {
+        return $false
+    }
+
+    $commandLine = [string]$ProcessInfo.CommandLine
+    foreach ($fragment in $ExpectedCommandFragments) {
+        if ($commandLine -notlike "*$fragment*") {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-ProcessTreeContainsCommand {
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [Parameter(Mandatory = $true)][string[]]$ExpectedCommandFragments
+    )
+
+    foreach ($processId in Get-ProcessTreeIds -RootProcessId $RootProcessId) {
+        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" `
+            -ErrorAction SilentlyContinue
+        if ($processInfo -and (Test-ExpectedPythonCommand `
+                    -ProcessInfo $processInfo `
+                    -ExpectedCommandFragments $ExpectedCommandFragments)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Stop-ProcessTree {
+    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+
+    $processIds = @(Get-ProcessTreeIds -RootProcessId $RootProcessId)
+    [array]::Reverse($processIds)
+    foreach ($processId in $processIds) {
+        $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        if ($process) {
+            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Stop-RecordedProcess {
     param(
         [Parameter(Mandatory = $true)][string]$PidFile,
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$ExpectedExecutable,
         [Parameter(Mandatory = $true)][string[]]$ExpectedCommandFragments
     )
 
@@ -90,36 +155,46 @@ function Stop-RecordedProcess {
         $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $rawPid" `
             -ErrorAction SilentlyContinue
         if ($processInfo) {
-            $actualExecutable = [string]$processInfo.ExecutablePath
-            $actualCommand = [string]$processInfo.CommandLine
-            $sameExecutable = $actualExecutable.Equals(
-                $ExpectedExecutable,
-                [System.StringComparison]::OrdinalIgnoreCase
-            )
-            $hasExpectedCommand = $true
-            foreach ($fragment in $ExpectedCommandFragments) {
-                if ($actualCommand -notlike "*$fragment*") {
-                    $hasExpectedCommand = $false
-                    break
-                }
-            }
-
-            if (-not $sameExecutable -or -not $hasExpectedCommand) {
+            if (-not (Test-ProcessTreeContainsCommand `
+                        -RootProcessId ([int]$rawPid) `
+                        -ExpectedCommandFragments $ExpectedCommandFragments)) {
                 Write-Warning "Ignoring stale or unsafe $Name PID file: $PidFile"
                 Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
                 return
             }
 
             Write-Host "Stopping previous $Name process: $rawPid"
-            Stop-Process -Id ([int]$rawPid) -Force
-            $process = Get-Process -Id ([int]$rawPid) -ErrorAction SilentlyContinue
-            if ($process) {
-                $process.WaitForExit(5000) | Out-Null
-            }
+            Stop-ProcessTree -RootProcessId ([int]$rawPid)
+            Start-Sleep -Seconds 1
         }
     }
 
     Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+}
+
+function Set-ListeningPidFile {
+    param(
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][string]$PidFile,
+        [Parameter(Mandatory = $true)][string[]]$ExpectedCommandFragments
+    )
+
+    $connection = Get-NetTCPConnection -LocalAddress "127.0.0.1" `
+        -LocalPort $Port `
+        -State Listen `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $connection) {
+        return
+    }
+
+    $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($connection.OwningProcess)" `
+        -ErrorAction SilentlyContinue
+    if ($processInfo -and (Test-ExpectedPythonCommand `
+                -ProcessInfo $processInfo `
+                -ExpectedCommandFragments $ExpectedCommandFragments)) {
+        $connection.OwningProcess | Set-Content -Path $PidFile
+    }
 }
 
 function Start-DemoProcess {
@@ -181,6 +256,8 @@ New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
 
 $env:TEG_APP_ENV = "local"
 $env:TEG_DATABASE_PATH = $DatabasePathForEnv
+$env:STREAMLIT_SERVER_HEADLESS = "true"
+$env:STREAMLIT_BROWSER_GATHER_USAGE_STATS = "false"
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     throw "uv was not found. Install uv first: https://docs.astral.sh/uv/"
@@ -236,16 +313,18 @@ $uiArguments = @(
     "--server.address",
     "127.0.0.1",
     "--server.port",
-    "8501"
+    "8501",
+    "--server.headless",
+    "true",
+    "--browser.gatherUsageStats",
+    "false"
 )
 
 Stop-RecordedProcess -PidFile $apiPidFile `
     -Name "API" `
-    -ExpectedExecutable $PythonExecutable `
     -ExpectedCommandFragments @("uvicorn", "trade_entity_graph.api.main:app", "8000")
 Stop-RecordedProcess -PidFile $uiPidFile `
     -Name "Streamlit" `
-    -ExpectedExecutable $PythonExecutable `
     -ExpectedCommandFragments @("streamlit", "streamlit_app.py", "8501")
 
 if (Test-TcpPort -ComputerName "127.0.0.1" -Port 8000) {
@@ -270,6 +349,22 @@ $uiProcess = Start-DemoProcess -Name "Streamlit" `
 $apiReady = Wait-HttpOk -Url "$apiUrl/health"
 $uiReady = Wait-HttpOk -Url $uiUrl
 
+if (-not $apiReady -or -not $uiReady) {
+    Stop-ProcessTree -RootProcessId $apiProcess.Id
+    Stop-ProcessTree -RootProcessId $uiProcess.Id
+    Remove-Item -LiteralPath $apiPidFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $uiPidFile -Force -ErrorAction SilentlyContinue
+    Write-Warning "One or more services did not respond before the timeout. Check data/processed/logs/."
+    exit 1
+}
+
+Set-ListeningPidFile -Port 8000 `
+    -PidFile $apiPidFile `
+    -ExpectedCommandFragments @("uvicorn", "trade_entity_graph.api.main:app", "8000")
+Set-ListeningPidFile -Port 8501 `
+    -PidFile $uiPidFile `
+    -ExpectedCommandFragments @("streamlit", "streamlit_app.py", "8501")
+
 Write-Host ""
 Write-Host "Demo stack:"
 Write-Host "  API:       $apiUrl"
@@ -278,8 +373,3 @@ Write-Host "  Streamlit: $uiUrl"
 Write-Host "  Database:  $DatabasePathForEnv"
 Write-Host "  Demo CSVs: data/demo/"
 Write-Host "  Logs:      data/processed/logs/"
-
-if (-not $apiReady -or -not $uiReady) {
-    Write-Warning "One or more services did not respond before the timeout. Check data/processed/logs/."
-    exit 1
-}
