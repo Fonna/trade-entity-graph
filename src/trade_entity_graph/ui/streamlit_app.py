@@ -280,16 +280,28 @@ def format_manual_review_context(detail: dict[str, Any] | None) -> str:
         or detail.get("recommendation_reason")
         or "-"
     )
+    confidence_score = detail.get("confidence_score")
+    confidence_score_text = "-" if confidence_score in (None, "") else confidence_score
+    order_count = detail.get("order_count") or 0
+    total_teu = detail.get("total_teu")
+    total_teu_text = "-" if total_teu in (None, "") else total_teu
 
     lines = [
         f"- 主体 A：{detail.get('from_name') or detail.get('source_label') or '-'}",
         f"- 主体 B：{detail.get('to_name') or detail.get('target_label') or '-'}",
         f"- 新候选关系：{relation_type}",
+        f"- 候选状态：{detail.get('relation_status') or '-'}",
+        f"- 置信度：{detail.get('confidence_level') or '-'} / {confidence_score_text}",
+        f"- 订单证据：{order_count} orders / {total_teu_text} TEU",
+        f"- 推荐理由：{detail.get('recommendation_reason') or '-'}",
     ]
     if context:
         lines.extend(
             [
                 f"- 历史结论：{history_relation_type} / {history_status}",
+                f"- 历史审核人：{history.get('verified_by') or '-'}",
+                f"- 历史审核时间：{history.get('verified_at') or '-'}",
+                f"- 历史备注：{history.get('decision_note') or '-'}",
                 f"- 冲突原因：{conflict_reason}",
             ]
         )

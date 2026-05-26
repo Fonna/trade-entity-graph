@@ -335,11 +335,25 @@ def test_manual_review_context_is_name_first_without_primary_entity_ids() -> Non
             "to_entity_id": "ENT_B",
             "to_name": "BETA FACTORY",
             "candidate_relation_type": "trading_partner_candidate",
+            "relation_status": "history_conflict",
+            "confidence_level": "medium",
+            "confidence_score": 0.73,
+            "order_count": 4,
+            "total_teu": 12.5,
+            "recommendation_reason": "历史拒绝但新订单证据增加",
             "history_context": {
                 "history_relationship_id": "REL_OLD",
                 "relation_type": "rejected_relation",
                 "status": "rejected",
                 "conflict_reason": "新证据与历史否定结论冲突",
+                "history_relationship": {
+                    "relationship_id": "REL_OLD",
+                    "relation_type": "rejected_relation",
+                    "relation_status": "rejected",
+                    "verified_by": "alice",
+                    "verified_at": "2026-05-20T09:30:00",
+                    "decision_note": "旧证据不足",
+                },
             },
         }
     )
@@ -347,7 +361,14 @@ def test_manual_review_context_is_name_first_without_primary_entity_ids() -> Non
     assert "主体 A：ACME TRADING" in summary
     assert "主体 B：BETA FACTORY" in summary
     assert "新候选关系：trading_partner_candidate" in summary
+    assert "候选状态：history_conflict" in summary
+    assert "置信度：medium / 0.73" in summary
+    assert "订单证据：4 orders / 12.5 TEU" in summary
+    assert "推荐理由：历史拒绝但新订单证据增加" in summary
     assert "历史结论：rejected_relation / rejected" in summary
+    assert "历史审核人：alice" in summary
+    assert "历史审核时间：2026-05-20T09:30:00" in summary
+    assert "历史备注：旧证据不足" in summary
     assert "冲突原因：" in summary
     assert "ENT_A" not in summary
     assert "ENT_B" not in summary
