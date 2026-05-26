@@ -36,7 +36,11 @@ def _row_to_dict(row: Any | None) -> dict[str, Any] | None:
 
 
 def _append_history_reason(current_reason: str | None, history_reason: str) -> str:
-    base = (current_reason or "").split(" | history reuse:", 1)[0].strip()
+    current = (current_reason or "").strip()
+    if current.startswith("history reuse:"):
+        base = ""
+    else:
+        base = current.split(" | history reuse:", 1)[0].strip()
     suffix = f"history reuse: {history_reason}"
     return f"{base} | {suffix}" if base else suffix
 

@@ -38,6 +38,7 @@ def _insert_claim(
     candidate_relation_type: str = "trading_partner_candidate",
     confidence_level: str = "medium",
     confidence_score: float = 0.55,
+    recommendation_reason: str | None = "3 orders, 12.5 TEU",
     run_id: str = "RUN_HISTORY",
 ) -> str:
     claim_id = new_id("CLM")
@@ -48,7 +49,7 @@ def _insert_claim(
             relation_status, confidence_level, confidence_score, order_count,
             total_teu, recommendation_reason, run_id
         )
-        VALUES (?, ?, ?, ?, 'candidate', ?, ?, 3, 12.5, '3 orders, 12.5 TEU', ?)
+        VALUES (?, ?, ?, ?, 'candidate', ?, ?, 3, 12.5, ?, ?)
         """,
         (
             claim_id,
@@ -57,6 +58,7 @@ def _insert_claim(
             candidate_relation_type,
             confidence_level,
             confidence_score,
+            recommendation_reason,
             run_id,
         ),
     )
@@ -267,3 +269,27 @@ def test_directional_history_types_do_not_match_reverse_pair(tmp_path) -> None:
 
     assert result == {"history_matched": 0, "history_conflict": 0, "unchanged": 1}
     assert _read_claim_status(db_path, claim_id) == "candidate"
+
+
+def test_empty_reason_rerun_does_not_duplicate_history_reuse_note(tmp_path) -> None:
+    db_path = tmp_path / "history.db"
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        _insert_batch(connection)
+        acme = _insert_entity(connection, "ACME TRADING")
+        beta = _insert_entity(connection, "BETA FACTORY")
+        claim_id = _insert_claim(connection, acme, beta, recommendation_reason=None)
+        _insert_history(
+            connection,
+            acme,
+            beta,
+            relation_type="trading_partner",
+            relation_status="verified",
+        )
+        connection.commit()
+
+    apply_history_reuse_to_claims(run_id="RUN_HISTORY", db_path=db_path)
+    apply_history_reuse_to_claims(run_id="RUN_HISTORY", db_path=db_path)
+
+    reason = _read_claim_reason(db_path, claim_id)
+    assert reason.count("history reuse:") == 1
