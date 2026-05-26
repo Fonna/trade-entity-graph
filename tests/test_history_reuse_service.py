@@ -243,6 +243,33 @@ def test_symmetric_history_types_match_reverse_pair(tmp_path) -> None:
     assert _read_claim_status(db_path, claim_id) == "history_matched"
 
 
+def test_subsidiary_candidate_matches_subsidiary_history(tmp_path) -> None:
+    db_path = tmp_path / "history.db"
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        _insert_batch(connection)
+        parent = _insert_entity(connection, "PARENT GROUP")
+        child = _insert_entity(connection, "CHILD FACTORY")
+        claim_id = _insert_claim(
+            connection,
+            parent,
+            child,
+            candidate_relation_type="subsidiary_candidate",
+        )
+        _insert_history(
+            connection,
+            parent,
+            child,
+            relation_type="subsidiary",
+            relation_status="verified",
+        )
+        connection.commit()
+
+    apply_history_reuse_to_claims(run_id="RUN_HISTORY", db_path=db_path)
+
+    assert _read_claim_status(db_path, claim_id) == "history_matched"
+
+
 def test_directional_history_types_do_not_match_reverse_pair(tmp_path) -> None:
     db_path = tmp_path / "history.db"
     initialize_database(db_path)

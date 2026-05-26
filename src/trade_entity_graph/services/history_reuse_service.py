@@ -28,6 +28,11 @@ COMPATIBLE_RELATION_TYPES = {
     "factory_candidate": {"factory_node", "subsidiary", "same_group"},
     "sales_center_candidate": {"sales_center", "subsidiary", "same_group"},
     "same_group_candidate": {"same_group", "subsidiary", "same_entity"},
+    "subsidiary_candidate": {"subsidiary", "same_group", "same_entity"},
+    "logistics_service_candidate": {"logistics_service"},
+    "unknown_candidate": {"unknown"},
+    "same_entity_candidate": {"same_entity"},
+    "co_order_role_candidate": {"co_order_role"},
 }
 
 
@@ -113,7 +118,10 @@ def _classify(claim: dict[str, Any], history: dict[str, Any]) -> tuple[str, str]
             f"low confidence candidate keeps rejected history {history['relationship_id']}",
         )
 
-    if _is_compatible(claim["candidate_relation_type"], history["relation_type"]):
+    if (
+        history["relation_status"] in POSITIVE_EFFECTIVE_STATUSES
+        and _is_compatible(claim["candidate_relation_type"], history["relation_type"])
+    ):
         return (
             "history_matched",
             f"compatible historical relationship {history['relationship_id']} was found",
