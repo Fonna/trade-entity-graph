@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import trade_entity_graph.services.review_service as review_service_module
 from trade_entity_graph.db.connection import get_connection, initialize_database
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
 from trade_entity_graph.services.review_service import (
@@ -144,6 +145,52 @@ def _fetch_one(db_path, query: str, params: tuple = ()):
 def _fetch_all(db_path, query: str, params: tuple = ()) -> list[dict]:
     with get_connection(db_path) as connection:
         return [dict(row) for row in connection.execute(query, params).fetchall()]
+
+
+class _RecordingConnection:
+    def __init__(self, connection, statements: list[str]) -> None:
+        self._connection = connection
+        self._statements = statements
+
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self._connection.__exit__(exc_type, exc_value, traceback)
+
+    def execute(self, sql, parameters=()):
+        self._statements.append(" ".join(sql.split()).upper())
+        return self._connection.execute(sql, parameters)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def test_decide_relationship_starts_immediate_transaction_before_reads(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, _history_id = _seed_history_conflict(db_path)
+    statements: list[str] = []
+    original_get_connection = review_service_module.get_connection
+
+    def recording_get_connection(path=None):
+        return _RecordingConnection(original_get_connection(path), statements)
+
+    monkeypatch.setattr(review_service_module, "get_connection", recording_get_connection)
+
+    decide_relationship(
+        claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Ordinary review with transaction lock",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    assert statements[0] == "BEGIN IMMEDIATE"
 
 
 def test_keep_history_for_claim_reuses_history_without_duplicate_relationship(tmp_path) -> None:

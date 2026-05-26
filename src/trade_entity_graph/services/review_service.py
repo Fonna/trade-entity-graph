@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,10 @@ ORDINARY_DECISION_CLAIM_STATUSES = (
     "history_matched",
 )
 SUPERSEDE_CLAIM_STATUSES = ("history_conflict",)
+
+
+def _begin_immediate(connection) -> None:
+    connection.execute("BEGIN IMMEDIATE")
 
 
 def _write_decision_and_audit(
@@ -236,6 +241,10 @@ def _ensure_claim_has_no_history_final_decision(connection, claim_id: str) -> No
         raise ValueError(f"Claim already finalized by history review: {claim_id}")
 
 
+def _raise_duplicate_review_error(claim_id: str) -> None:
+    raise ValueError(f"Claim already has a reviewed relationship: {claim_id}")
+
+
 def _resolve_history_relationship_id(
     claim_id: str,
     *,
@@ -267,6 +276,7 @@ def decide_relationship(
         raise ValueError(f"Unsupported action_type: {action_type}")
 
     with get_connection(db_path) as connection:
+        _begin_immediate(connection)
         claim = _fetch_claim_or_raise(connection, claim_id)
         _validate_claim_state(
             claim,
@@ -278,29 +288,34 @@ def decide_relationship(
 
         relationship_id = new_id("REL")
         after_status = status_by_action[action_type]
-        connection.execute(
-            """
-            INSERT INTO curated_relationship (
-                relationship_id, from_entity_id, to_entity_id, relation_type,
-                relation_status, confidence_level, confidence_score, source_type,
-                decision_source, decision_note, verified_by, verified_at
+        try:
+            connection.execute(
+                """
+                INSERT INTO curated_relationship (
+                    relationship_id, from_entity_id, to_entity_id, relation_type,
+                    relation_status, confidence_level, confidence_score, source_type,
+                    decision_source, decision_note, verified_by, verified_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    relationship_id,
+                    claim["from_entity_id"],
+                    claim["to_entity_id"],
+                    relation_type,
+                    after_status,
+                    claim["confidence_level"],
+                    claim["confidence_score"],
+                    "claim",
+                    claim_id,
+                    reason,
+                    operator,
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-            (
-                relationship_id,
-                claim["from_entity_id"],
-                claim["to_entity_id"],
-                relation_type,
-                after_status,
-                claim["confidence_level"],
-                claim["confidence_score"],
-                "claim",
-                claim_id,
-                reason,
-                operator,
-            ),
-        )
+        except sqlite3.IntegrityError as exc:
+            if "decision_source" in str(exc):
+                _raise_duplicate_review_error(claim_id)
+            raise
         _write_decision_and_audit(
             connection,
             relationship_id=relationship_id,
@@ -331,6 +346,7 @@ def keep_history_for_claim(
     """Keep the effective historical relationship and mark the claim as matched."""
 
     with get_connection(db_path) as connection:
+        _begin_immediate(connection)
         claim = _fetch_claim_or_raise(connection, claim_id)
         _validate_claim_state(
             claim,
@@ -338,6 +354,7 @@ def keep_history_for_claim(
             action="keep history",
         )
         _ensure_claim_has_no_curated_relationship(connection, claim_id)
+        _ensure_claim_has_no_history_final_decision(connection, claim_id)
         history_relationship_id = _resolve_history_relationship_id(
             claim_id,
             old_relationship_id=None,
@@ -352,11 +369,22 @@ def keep_history_for_claim(
             SET relation_status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE claim_id = ?
               AND relation_status IN ({status_placeholders})
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM curated_relationship cr
+                  WHERE cr.decision_source = relationship_claim.claim_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM relationship_decision rd
+                  WHERE rd.claim_id = relationship_claim.claim_id
+                    AND rd.action_type IN ('keep_history', 'supersede')
+              )
             """,
             (after_status, claim_id, *KEEP_HISTORY_CLAIM_STATUSES),
         )
         if cursor.rowcount != 1:
-            raise ValueError("Claim must be in an allowed state to keep history")
+            raise ValueError("Claim must be in an allowed, unfinalized state to keep history")
         _write_claim_decision_and_audit(
             connection,
             claim=claim,
@@ -388,6 +416,7 @@ def supersede_history_with_claim(
 
     relationship_id = new_id("REL")
     with get_connection(db_path) as connection:
+        _begin_immediate(connection)
         claim = _fetch_claim_or_raise(connection, claim_id)
         _validate_supersede_claim_state(claim)
         _ensure_claim_has_no_curated_relationship(connection, claim_id)
@@ -436,6 +465,28 @@ def supersede_history_with_claim(
             raise ValueError(
                 "Superseded relationship must be current-effective and match the claim pair"
             )
+        claim_cursor = connection.execute(
+            """
+            UPDATE relationship_claim
+            SET relation_status = 'verified', updated_at = CURRENT_TIMESTAMP
+            WHERE claim_id = ?
+              AND relation_status = ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM relationship_decision rd
+                  WHERE rd.claim_id = relationship_claim.claim_id
+                    AND rd.action_type IN ('keep_history', 'supersede')
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM curated_relationship cr
+                  WHERE cr.decision_source = relationship_claim.claim_id
+              )
+            """,
+            (claim_id, claim["relation_status"]),
+        )
+        if claim_cursor.rowcount != 1:
+            raise ValueError("Claim already finalized by history review")
         connection.execute(
             """
             INSERT INTO audit_log (
@@ -453,47 +504,35 @@ def supersede_history_with_claim(
                 reason,
             ),
         )
-        connection.execute(
-            """
-            INSERT INTO curated_relationship (
-                relationship_id, from_entity_id, to_entity_id, relation_type,
-                relation_status, confidence_level, confidence_score, source_type,
-                decision_source, decision_note, verified_by, verified_at,
-                valid_from, supersedes_relationship_id
+        try:
+            connection.execute(
+                """
+                INSERT INTO curated_relationship (
+                    relationship_id, from_entity_id, to_entity_id, relation_type,
+                    relation_status, confidence_level, confidence_score, source_type,
+                    decision_source, decision_note, verified_by, verified_at,
+                    valid_from, supersedes_relationship_id
+                )
+                VALUES (?, ?, ?, ?, 'verified', ?, ?, 'reviewed_claim', ?, ?, ?,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                """,
+                (
+                    relationship_id,
+                    claim["from_entity_id"],
+                    claim["to_entity_id"],
+                    relation_type,
+                    claim["confidence_level"],
+                    claim["confidence_score"],
+                    claim_id,
+                    reason,
+                    operator,
+                    history_relationship_id,
+                ),
             )
-            VALUES (?, ?, ?, ?, 'verified', ?, ?, 'reviewed_claim', ?, ?, ?,
-                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-            """,
-            (
-                relationship_id,
-                claim["from_entity_id"],
-                claim["to_entity_id"],
-                relation_type,
-                claim["confidence_level"],
-                claim["confidence_score"],
-                claim_id,
-                reason,
-                operator,
-                history_relationship_id,
-            ),
-        )
-        claim_cursor = connection.execute(
-            """
-            UPDATE relationship_claim
-            SET relation_status = 'verified', updated_at = CURRENT_TIMESTAMP
-            WHERE claim_id = ?
-              AND relation_status = ?
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM relationship_decision rd
-                  WHERE rd.claim_id = relationship_claim.claim_id
-                    AND rd.action_type IN ('keep_history', 'supersede')
-              )
-            """,
-            (claim_id, claim["relation_status"]),
-        )
-        if claim_cursor.rowcount != 1:
-            raise ValueError("Claim already finalized by history review")
+        except sqlite3.IntegrityError as exc:
+            if "decision_source" in str(exc):
+                _raise_duplicate_review_error(claim_id)
+            raise
         _write_decision_and_audit(
             connection,
             relationship_id=relationship_id,
@@ -542,6 +581,7 @@ def mark_claim_pending_verify(
     """Mark a claim for further verification without changing history."""
 
     with get_connection(db_path) as connection:
+        _begin_immediate(connection)
         claim = _fetch_claim_or_raise(connection, claim_id)
         _validate_claim_state(
             claim,
@@ -558,6 +598,11 @@ def mark_claim_pending_verify(
             SET relation_status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE claim_id = ?
               AND relation_status IN ({status_placeholders})
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM curated_relationship cr
+                  WHERE cr.decision_source = relationship_claim.claim_id
+              )
               AND NOT EXISTS (
                   SELECT 1
                   FROM relationship_decision rd
