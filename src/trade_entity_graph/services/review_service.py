@@ -539,6 +539,7 @@ def mark_claim_pending_verify(
             action="mark pending verify",
         )
         _ensure_claim_has_no_curated_relationship(connection, claim_id)
+        _ensure_claim_has_no_history_final_decision(connection, claim_id)
         after_status = "pending_verify"
         status_placeholders = ", ".join("?" for _ in MARK_PENDING_CLAIM_STATUSES)
         cursor = connection.execute(

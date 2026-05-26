@@ -1,5 +1,7 @@
 import sqlite3
 
+import pytest
+
 from trade_entity_graph.db.connection import get_connection, initialize_database
 
 EXPECTED_TABLES = {
@@ -17,6 +19,7 @@ EXPECTED_TABLES = {
 
 EXPECTED_INDEXES = {
     "idx_curated_relationship_pair",
+    "idx_curated_relationship_decision_source_unique",
     "idx_curated_relationship_status",
     "idx_entity_alias_name",
     "idx_entity_canonical_name",
@@ -91,3 +94,38 @@ def test_initialize_database_adds_missing_order_evidence_role_columns(tmp_path) 
         }
 
     assert {"customer_name", "shipper_name", "consignee_name", "notify_name"}.issubset(columns)
+
+
+def test_curated_relationship_decision_source_is_unique_when_present(tmp_path) -> None:
+    db_path = initialize_database(tmp_path / "trade_entity_graph.db")
+
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_A', 'ACME', 'company'), ('ENT_B', 'BETA', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id, from_entity_id, to_entity_id, relation_type,
+                relation_status, decision_source
+            )
+            VALUES
+                ('REL_NULL_1', 'ENT_A', 'ENT_B', 'trading_partner', 'verified', NULL),
+                ('REL_NULL_2', 'ENT_B', 'ENT_A', 'trading_partner', 'verified', NULL),
+                ('REL_CLAIM_1', 'ENT_A', 'ENT_B', 'trading_partner', 'verified', 'CLM_1')
+            """
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO curated_relationship (
+                    relationship_id, from_entity_id, to_entity_id, relation_type,
+                    relation_status, decision_source
+                )
+                VALUES ('REL_CLAIM_2', 'ENT_B', 'ENT_A', 'trading_partner', 'verified', 'CLM_1')
+                """
+            )

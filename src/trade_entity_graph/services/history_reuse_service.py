@@ -58,6 +58,23 @@ def _fetch_claim(connection, claim_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
+def _has_review_artifacts(connection, claim_id: str) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM relationship_decision
+        WHERE claim_id = ?
+        UNION
+        SELECT 1
+        FROM curated_relationship
+        WHERE decision_source = ?
+        LIMIT 1
+        """,
+        (claim_id, claim_id),
+    ).fetchone()
+    return row is not None
+
+
 def _fetch_effective_history(connection, claim: dict[str, Any]) -> list[dict[str, Any]]:
     status_placeholders = ", ".join("?" for _ in CURRENT_EFFECTIVE_STATUSES)
     symmetric_placeholders = ", ".join("?" for _ in SYMMETRIC_RELATION_TYPES)
@@ -199,6 +216,10 @@ def apply_history_reuse_to_claims(
 
         for claim_row in claims:
             claim = dict(claim_row)
+            if _has_review_artifacts(connection, claim["claim_id"]):
+                counters["unchanged"] += 1
+                continue
+
             context = classify_claim_against_history(connection, claim)
             if context is None:
                 counters["unchanged"] += 1

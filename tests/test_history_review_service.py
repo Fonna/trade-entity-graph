@@ -705,6 +705,77 @@ def test_mark_claim_pending_verify_rejects_verified_claim_after_supersede(tmp_pa
     assert claim == {"relation_status": "verified"}
 
 
+def test_mark_claim_pending_verify_rejects_claim_after_keep_history(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, _history_id = _seed_history_conflict(db_path)
+    keep_history_for_claim(
+        claim_id,
+        reason="Keep prior rejection",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    with pytest.raises(ValueError, match="already finalized"):
+        mark_claim_pending_verify(
+            claim_id,
+            reason="Should not reopen finalized keep-history claim",
+            operator="tester",
+            db_path=db_path,
+        )
+
+    claim = _fetch_one(
+        db_path,
+        "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+    pending_decisions = _fetch_one(
+        db_path,
+        """
+        SELECT COUNT(*) AS count
+        FROM relationship_decision
+        WHERE claim_id = ? AND action_type = 'mark_pending_verify'
+        """,
+        (claim_id,),
+    )
+
+    assert claim == {"relation_status": "history_matched"}
+    assert pending_decisions == {"count": 0}
+
+
+def test_apply_history_reuse_does_not_reprocess_keep_history_claim(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    claim_id, _history_id = _seed_history_conflict(db_path)
+    keep_history_for_claim(
+        claim_id,
+        reason="Keep prior rejection",
+        operator="tester",
+        db_path=db_path,
+    )
+    reason_before = _fetch_one(
+        db_path,
+        "SELECT recommendation_reason FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+
+    result = apply_history_reuse_to_claims(run_id="RUN_HISTORY_REVIEW", db_path=db_path)
+
+    claim = _fetch_one(
+        db_path,
+        """
+        SELECT relation_status, recommendation_reason
+        FROM relationship_claim
+        WHERE claim_id = ?
+        """,
+        (claim_id,),
+    )
+
+    assert result == {"history_matched": 0, "history_conflict": 0, "unchanged": 1}
+    assert claim == {
+        "relation_status": "history_matched",
+        "recommendation_reason": reason_before["recommendation_reason"],
+    }
+
+
 def test_supersede_history_with_claim_accepts_reversed_symmetric_history(tmp_path) -> None:
     db_path = tmp_path / "history-review.db"
     initialize_database(db_path)

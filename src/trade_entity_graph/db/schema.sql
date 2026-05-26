@@ -169,3 +169,6 @@ CREATE INDEX IF NOT EXISTS idx_order_role_edge_role_pair ON order_role_edge(role
 CREATE INDEX IF NOT EXISTS idx_relationship_claim_pair ON relationship_claim(from_entity_id, to_entity_id);
 CREATE INDEX IF NOT EXISTS idx_curated_relationship_pair ON curated_relationship(from_entity_id, to_entity_id);
 CREATE INDEX IF NOT EXISTS idx_curated_relationship_status ON curated_relationship(relation_status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_curated_relationship_decision_source_unique
+ON curated_relationship(decision_source)
+WHERE decision_source IS NOT NULL;
