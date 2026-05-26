@@ -31,6 +31,10 @@ def test_generate_demo_data_writes_importable_files(tmp_path) -> None:
     assert orders_path.exists()
     assert candidates_path.exists()
     assert readme_path.exists()
+    readme_text = readme_path.read_text(encoding="utf-8")
+    assert "scripts\\start_demo.ps1" in readme_text
+    assert "-PrepareDemoData" in readme_text
+    assert "data/processed/logs/" in readme_text
 
     entities = pd.read_csv(entities_path)
     orders = pd.read_csv(orders_path)

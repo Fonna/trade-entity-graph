@@ -774,7 +774,17 @@ def write_demo_data(output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> dict[str, in
         "- `demo_entities.csv`: about 50 importable company entities.\n"
         "- `demo_orders.csv`: order evidence rows that generate P0 role edges.\n"
         "- `demo_relationship_candidates.csv`: supplemental candidates resolved by "
-        "canonical name.\n",
+        "canonical name.\n\n"
+        "## Local Demo Startup\n\n"
+        "From the repository root, run:\n\n"
+        "```powershell\n"
+        "powershell -ExecutionPolicy Bypass -File .\\scripts\\start_demo.ps1\n"
+        "```\n\n"
+        "The script starts FastAPI at `http://127.0.0.1:8000` and Streamlit at "
+        "`http://127.0.0.1:8501`. If the default SQLite database does not exist yet, "
+        "it initializes the schema and imports this demo data. Use `-PrepareDemoData` "
+        "to import demo rows into an existing database. Service logs are written to "
+        "`data/processed/logs/`.\n",
         encoding="utf-8",
     )
     return {
