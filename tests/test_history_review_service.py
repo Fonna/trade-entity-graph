@@ -510,6 +510,99 @@ def test_supersede_history_with_claim_deprecates_old_and_creates_verified_relati
     }
 
 
+def test_supersede_history_with_claim_accepts_history_matched_claim(tmp_path) -> None:
+    db_path = tmp_path / "history-review.db"
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        _insert_batch(connection)
+        acme = _insert_entity(connection, "ACME TRADING")
+        beta = _insert_entity(connection, "BETA FACTORY")
+        claim_id = _insert_high_confidence_claim(connection, acme, beta)
+        history_id = _insert_history(
+            connection,
+            acme,
+            beta,
+            relation_type="trading_partner",
+            relation_status="verified",
+        )
+        connection.commit()
+
+    reuse_result = apply_history_reuse_to_claims(
+        run_id="RUN_HISTORY_REVIEW",
+        db_path=db_path,
+    )
+    claim_after_reuse = _fetch_one(
+        db_path,
+        "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+
+    assert reuse_result == {"history_matched": 1, "history_conflict": 0, "unchanged": 0}
+    assert claim_after_reuse == {"relation_status": "history_matched"}
+
+    replacement = supersede_history_with_claim(
+        claim_id,
+        old_relationship_id=history_id,
+        relation_type="trading_partner",
+        reason="New import is correct; prior history match was wrong",
+        operator="tester",
+        db_path=db_path,
+    )
+
+    old_relationship = _fetch_one(
+        db_path,
+        """
+        SELECT relation_status, valid_to
+        FROM curated_relationship
+        WHERE relationship_id = ?
+        """,
+        (history_id,),
+    )
+    new_relationship = _fetch_one(
+        db_path,
+        """
+        SELECT relation_status, supersedes_relationship_id
+        FROM curated_relationship
+        WHERE relationship_id = ?
+        """,
+        (replacement["relationship_id"],),
+    )
+    claim_after_supersede = _fetch_one(
+        db_path,
+        "SELECT relation_status FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    )
+
+    assert old_relationship["relation_status"] == "deprecated"
+    assert old_relationship["valid_to"] is not None
+    assert new_relationship == {
+        "relation_status": "verified",
+        "supersedes_relationship_id": history_id,
+    }
+    assert claim_after_supersede == {"relation_status": "verified"}
+
+    with pytest.raises(ValueError):
+        supersede_history_with_claim(
+            claim_id,
+            old_relationship_id=history_id,
+            relation_type="trading_partner",
+            reason="Do not allow duplicate finalization",
+            operator="tester",
+            db_path=db_path,
+        )
+    reviewed_relationship_count = _fetch_one(
+        db_path,
+        """
+        SELECT COUNT(*) AS count
+        FROM curated_relationship
+        WHERE decision_source = ?
+        """,
+        (claim_id,),
+    )
+
+    assert reviewed_relationship_count == {"count": 1}
+
+
 def test_mark_claim_pending_verify_leaves_history_unchanged(tmp_path) -> None:
     db_path = tmp_path / "history-review.db"
     claim_id, history_id = _seed_history_conflict(db_path)

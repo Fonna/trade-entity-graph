@@ -18,7 +18,7 @@ CURRENT_EFFECTIVE_STATUSES = ("verified", "manual_only", "rejected")
 KEEP_HISTORY_CLAIM_STATUSES = ("history_conflict", "pending_verify", "history_matched")
 MARK_PENDING_CLAIM_STATUSES = ("candidate", "history_conflict", "history_matched")
 ORDINARY_DECISION_CLAIM_STATUSES = ("candidate",)
-SUPERSEDE_CLAIM_STATUSES = ("history_conflict", "pending_verify")
+SUPERSEDE_CLAIM_STATUSES = ("history_conflict", "pending_verify", "history_matched")
 
 
 def _begin_immediate(connection) -> None:
@@ -194,9 +194,9 @@ def _fetch_current_effective_history_for_claim(
 
 def _validate_supersede_claim_state(claim: dict[str, Any]) -> None:
     if claim["relation_status"] not in SUPERSEDE_CLAIM_STATUSES:
+        allowed = ", ".join(SUPERSEDE_CLAIM_STATUSES)
         raise ValueError(
-            "Claim must be in history_conflict or pending_verify status "
-            "to supersede history"
+            f"Claim must be in one of ({allowed}) to supersede history"
         )
 
 

@@ -801,6 +801,107 @@ def test_relationship_api_supersede_history_deprecates_old_relationship(
     assert old_relationship["valid_to"] is not None
 
 
+def test_relationship_api_supersede_history_accepts_history_matched_claim(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-supersede-history-matched.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_SUPERSEDE_MATCHED', 'api-supersede-matched.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_SUP_MATCHED_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_SUP_MATCHED_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id, from_entity_id, to_entity_id, relation_type,
+                relation_status, source_type, decision_note, verified_by, verified_at
+            )
+            VALUES (
+                'REL_SUPERSEDED_MATCHED_ROUTE',
+                'ENT_SUP_MATCHED_FROM',
+                'ENT_SUP_MATCHED_TO',
+                'trading_partner',
+                'verified',
+                'manual',
+                'Historical relationship',
+                'reviewer',
+                CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_SUPERSEDE_MATCHED_ROUTE',
+                'ENT_SUP_MATCHED_FROM',
+                'ENT_SUP_MATCHED_TO',
+                'trading_partner_candidate',
+                'history_matched',
+                'high',
+                0.88,
+                5,
+                21.5,
+                'History matched',
+                'RUN_API_SUPERSEDE_MATCHED'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_SUPERSEDE_MATCHED_ROUTE/decision",
+        json_body={
+            "action_type": "supersede_history",
+            "old_relationship_id": "REL_SUPERSEDED_MATCHED_ROUTE",
+            "relation_type": "trading_partner",
+            "reason": "New import corrects the matched history",
+            "operator": "tester",
+        },
+    )
+    assert status == 200
+    assert payload["relation_status"] == "verified"
+    assert payload["supersedes_relationship_id"] == "REL_SUPERSEDED_MATCHED_ROUTE"
+
+    with get_connection(db_path) as connection:
+        old_relationship = connection.execute(
+            """
+            SELECT relation_status, valid_to
+            FROM curated_relationship
+            WHERE relationship_id = ?
+            """,
+            ("REL_SUPERSEDED_MATCHED_ROUTE",),
+        ).fetchone()
+    assert old_relationship["relation_status"] == "deprecated"
+    assert old_relationship["valid_to"] is not None
+
+
 def test_relationship_api_ordinary_decision_requires_relation_type(
     tmp_path, monkeypatch
 ) -> None:
