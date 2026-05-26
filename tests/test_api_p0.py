@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 
 import pandas as pd
 
+from trade_entity_graph.api.routers.imports import ImportRunRequest, run_import_endpoint
 from trade_entity_graph.db.connection import get_connection, initialize_database
 
 
@@ -238,6 +239,84 @@ def test_relationship_api_returns_history_context_and_keeps_history(
     assert status == 200
     assert decision_payload["relation_status"] == "history_matched"
 
+    status, finalized_payload = _request(app, "GET", "/relationships/CLM_CONFLICT")
+    assert status == 200
+    assert finalized_payload["relation_status"] == "history_matched"
+    assert finalized_payload["history_context"] is None
+
+    status, duplicate_payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_CONFLICT/decision",
+        json_body={
+            "action_type": "keep_history",
+            "reason": "Duplicate keep history",
+            "operator": "tester",
+        },
+    )
+    assert 400 <= status < 500
+    assert duplicate_payload["detail"]
+
+
+def test_relationship_api_invalid_action_type_returns_json_4xx(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-invalid-action.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_INVALID', 'api-invalid.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_BAD_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_BAD_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_BAD_ACTION', 'ENT_BAD_FROM', 'ENT_BAD_TO',
+                'trading_partner_candidate', 'candidate', 'medium', 0.55,
+                3, 12.5, '3 orders, 12.5 TEU', 'RUN_API_INVALID'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "POST",
+        "/relationships/CLM_BAD_ACTION/decision",
+        json_body={
+            "action_type": "not_supported",
+            "relation_type": "trading_partner",
+            "reason": "Invalid action",
+            "operator": "tester",
+        },
+    )
+    assert 400 <= status < 500
+    assert payload["detail"]
+
 
 def test_relationship_api_supersede_history_requires_relation_type(
     tmp_path, monkeypatch
@@ -296,3 +375,47 @@ def test_relationship_api_supersede_history_requires_relation_type(
     )
     assert status == 422
     assert payload["detail"]
+
+
+def test_import_endpoint_applies_history_reuse_to_imported_claims_without_aggregation(
+    monkeypatch,
+) -> None:
+    class ImportResult:
+        run_id = "RUN_IMPORTED_CLAIMS"
+        entity_count = 2
+        alias_count = 0
+        evidence_count = 0
+        claim_count = 1
+        skipped_rows = []
+        archived_files = []
+
+    calls = []
+
+    def fake_apply_history_reuse_to_claims(*, run_id):
+        calls.append(run_id)
+        return {"history_matched": 1, "history_conflict": 0, "unchanged": 0}
+
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.run_import",
+        lambda inputs: ImportResult(),
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.apply_history_reuse_to_claims",
+        fake_apply_history_reuse_to_claims,
+    )
+
+    payload = run_import_endpoint(
+        ImportRunRequest(
+            relationships_path="relationships.csv",
+            generate_edges=False,
+            aggregate_claims=False,
+        )
+    )
+
+    assert payload["claim_count"] == 1
+    assert payload["history_reuse"] == {
+        "history_matched": 1,
+        "history_conflict": 0,
+        "unchanged": 0,
+    }
+    assert calls == ["RUN_IMPORTED_CLAIMS"]

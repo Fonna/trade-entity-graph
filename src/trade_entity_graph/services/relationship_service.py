@@ -20,6 +20,12 @@ P0_ROLE_PAIRS = (
 )
 
 INVALID_ROLE_NAMES = {"", "SAME AS", "TO ORDER", "YQN", "YQN LOGISTICS"}
+REVIEWABLE_DETAIL_CLAIM_STATUSES = (
+    "candidate",
+    "history_matched",
+    "history_conflict",
+    "pending_verify",
+)
 
 
 def _is_invalid_role_name(value: str | None) -> bool:
@@ -201,6 +207,23 @@ def aggregate_relationship_claims(
         return {"claim_count": claim_count}
 
 
+def _has_review_artifacts(connection, claim_id: str) -> bool:
+    row = connection.execute(
+        """
+        SELECT 1
+        FROM relationship_decision
+        WHERE claim_id = ?
+        UNION
+        SELECT 1
+        FROM curated_relationship
+        WHERE decision_source = ?
+        LIMIT 1
+        """,
+        (claim_id, claim_id),
+    ).fetchone()
+    return row is not None
+
+
 def get_relationship_detail(
     relationship_id: str, *, db_path: str | Path | None = None
 ) -> dict[str, Any] | None:
@@ -237,9 +260,14 @@ def get_relationship_detail(
         if not row:
             return None
         detail = dict(row)
-        detail["history_context"] = get_history_context_for_claim(
-            relationship_id, db_path=db_path
-        )
+        detail["history_context"] = None
+        if (
+            detail["relation_status"] in REVIEWABLE_DETAIL_CLAIM_STATUSES
+            and not _has_review_artifacts(connection, relationship_id)
+        ):
+            detail["history_context"] = get_history_context_for_claim(
+                relationship_id, db_path=db_path
+            )
         return detail
 
 

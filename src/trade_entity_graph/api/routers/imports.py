@@ -47,6 +47,8 @@ def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
     if request.aggregate_claims:
         claim_count = aggregate_relationship_claims(run_id=result.run_id)["claim_count"]
         history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
+    elif result.claim_count > 0:
+        history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
     return {
         "run_id": result.run_id,
         "entity_count": result.entity_count,

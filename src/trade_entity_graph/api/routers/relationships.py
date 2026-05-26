@@ -19,6 +19,13 @@ from trade_entity_graph.services.review_service import (
 
 router = APIRouter(prefix="/relationships", tags=["relationships"])
 
+HISTORY_ACTIONS = {"keep_history", "mark_pending_verify", "supersede_history"}
+ORDINARY_ACTIONS = {"confirm", "modify", "reject"}
+
+
+def _bad_request_from_value_error(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
 
 class DecisionRequest(BaseModel):
     action_type: str
@@ -53,38 +60,44 @@ def get_relationship_evidence_endpoint(relationship_id: str) -> list[dict[str, o
 def decide_relationship_endpoint(
     relationship_id: str, request: DecisionRequest
 ) -> dict[str, object]:
-    if request.action_type == "keep_history":
-        return keep_history_for_claim(
-            relationship_id,
-            reason=request.reason,
-            operator=request.operator,
-        )
-    if request.action_type == "mark_pending_verify":
-        return mark_claim_pending_verify(
-            relationship_id,
-            reason=request.reason,
-            operator=request.operator,
-        )
-    if request.action_type == "supersede_history":
+    if request.action_type not in HISTORY_ACTIONS | ORDINARY_ACTIONS:
+        raise HTTPException(status_code=422, detail="Unsupported action_type")
+
+    try:
+        if request.action_type == "keep_history":
+            return keep_history_for_claim(
+                relationship_id,
+                reason=request.reason,
+                operator=request.operator,
+            )
+        if request.action_type == "mark_pending_verify":
+            return mark_claim_pending_verify(
+                relationship_id,
+                reason=request.reason,
+                operator=request.operator,
+            )
+        if request.action_type == "supersede_history":
+            if request.relation_type is None:
+                raise HTTPException(status_code=422, detail="relation_type is required")
+            return supersede_history_with_claim(
+                relationship_id,
+                old_relationship_id=request.old_relationship_id,
+                relation_type=request.relation_type,
+                reason=request.reason,
+                operator=request.operator,
+            )
+
         if request.relation_type is None:
             raise HTTPException(status_code=422, detail="relation_type is required")
-        return supersede_history_with_claim(
+        return decide_relationship(
             relationship_id,
-            old_relationship_id=request.old_relationship_id,
+            action_type=request.action_type,
             relation_type=request.relation_type,
             reason=request.reason,
             operator=request.operator,
         )
-
-    if request.relation_type is None:
-        raise HTTPException(status_code=422, detail="relation_type is required")
-    return decide_relationship(
-        relationship_id,
-        action_type=request.action_type,
-        relation_type=request.relation_type,
-        reason=request.reason,
-        operator=request.operator,
-    )
+    except ValueError as exc:
+        raise _bad_request_from_value_error(exc) from exc
 
 
 @router.post("/manual")
