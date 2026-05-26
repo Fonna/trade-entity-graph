@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from trade_entity_graph.db.connection import get_connection
+from trade_entity_graph.services.history_reuse_service import get_history_context_for_claim
 from trade_entity_graph.utils.ids import new_id
 
 
@@ -60,6 +61,94 @@ def _write_decision_and_audit(
             reason,
         ),
     )
+
+
+def _write_claim_decision_and_audit(
+    connection,
+    *,
+    claim: dict[str, Any],
+    relationship_id: str | None,
+    action_type: str,
+    after_status: str,
+    reason: str,
+    operator: str,
+    after_relation_type: str | None = None,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO relationship_decision (
+            decision_id, relationship_id, claim_id, action_type, before_relation_type,
+            after_relation_type, before_status, after_status, reason, operator
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("DEC"),
+            relationship_id,
+            claim["claim_id"],
+            action_type,
+            claim["candidate_relation_type"],
+            after_relation_type or claim["candidate_relation_type"],
+            claim["relation_status"],
+            after_status,
+            reason,
+            operator,
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO audit_log (
+            audit_id, object_type, object_id, action_type, before_value,
+            after_value, operator, reason
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_id("AUD"),
+            "relationship_claim",
+            claim["claim_id"],
+            action_type,
+            claim["relation_status"],
+            after_status,
+            operator,
+            reason,
+        ),
+    )
+
+
+def _fetch_claim_or_raise(connection, claim_id: str) -> dict[str, Any]:
+    claim = connection.execute(
+        "SELECT * FROM relationship_claim WHERE claim_id = ?",
+        (claim_id,),
+    ).fetchone()
+    if not claim:
+        raise ValueError(f"Unknown relationship claim: {claim_id}")
+    return dict(claim)
+
+
+def _fetch_relationship_or_raise(connection, relationship_id: str) -> dict[str, Any]:
+    relationship = connection.execute(
+        "SELECT * FROM curated_relationship WHERE relationship_id = ?",
+        (relationship_id,),
+    ).fetchone()
+    if not relationship:
+        raise ValueError(f"Unknown curated relationship: {relationship_id}")
+    return dict(relationship)
+
+
+def _resolve_history_relationship_id(
+    claim_id: str,
+    *,
+    old_relationship_id: str | None,
+    db_path: str | Path | None,
+) -> str:
+    if old_relationship_id is not None:
+        return old_relationship_id
+
+    context = get_history_context_for_claim(claim_id, db_path=db_path)
+    if context is None:
+        raise ValueError(f"No historical relationship found for claim: {claim_id}")
+    return context["history_relationship"]["relationship_id"]
 
 
 def decide_relationship(
@@ -128,6 +217,200 @@ def decide_relationship(
             (relationship_id,),
         ).fetchone()
         return dict(row)
+
+
+def keep_history_for_claim(
+    claim_id: str,
+    *,
+    reason: str,
+    operator: str,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Keep the effective historical relationship and mark the claim as matched."""
+
+    history_relationship_id = _resolve_history_relationship_id(
+        claim_id,
+        old_relationship_id=None,
+        db_path=db_path,
+    )
+    with get_connection(db_path) as connection:
+        claim = _fetch_claim_or_raise(connection, claim_id)
+        history = _fetch_relationship_or_raise(connection, history_relationship_id)
+        after_status = "history_matched"
+        connection.execute(
+            """
+            UPDATE relationship_claim
+            SET relation_status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE claim_id = ?
+            """,
+            (after_status, claim_id),
+        )
+        _write_claim_decision_and_audit(
+            connection,
+            claim=claim,
+            relationship_id=history_relationship_id,
+            action_type="keep_history",
+            after_relation_type=history["relation_type"],
+            after_status=after_status,
+            reason=reason,
+            operator=operator,
+        )
+        connection.commit()
+        return {
+            "claim_id": claim_id,
+            "relation_status": after_status,
+            "history_relationship_id": history_relationship_id,
+        }
+
+
+def supersede_history_with_claim(
+    claim_id: str,
+    *,
+    old_relationship_id: str | None = None,
+    relation_type: str,
+    reason: str,
+    operator: str,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Deprecate the historical relationship and create a verified replacement."""
+
+    history_relationship_id = _resolve_history_relationship_id(
+        claim_id,
+        old_relationship_id=old_relationship_id,
+        db_path=db_path,
+    )
+    relationship_id = new_id("REL")
+    with get_connection(db_path) as connection:
+        claim = _fetch_claim_or_raise(connection, claim_id)
+        old_relationship = _fetch_relationship_or_raise(connection, history_relationship_id)
+        connection.execute(
+            """
+            UPDATE curated_relationship
+            SET relation_status = 'deprecated',
+                valid_to = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE relationship_id = ?
+            """,
+            (history_relationship_id,),
+        )
+        connection.execute(
+            """
+            INSERT INTO audit_log (
+                audit_id, object_type, object_id, action_type, before_value,
+                after_value, operator, reason
+            )
+            VALUES (?, 'curated_relationship', ?, 'deprecated', ?, ?, ?, ?)
+            """,
+            (
+                new_id("AUD"),
+                history_relationship_id,
+                old_relationship["relation_status"],
+                "deprecated",
+                operator,
+                reason,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id, from_entity_id, to_entity_id, relation_type,
+                relation_status, confidence_level, confidence_score, source_type,
+                decision_source, decision_note, verified_by, verified_at,
+                valid_from, supersedes_relationship_id
+            )
+            VALUES (?, ?, ?, ?, 'verified', ?, ?, 'claim', ?, ?, ?,
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+            """,
+            (
+                relationship_id,
+                claim["from_entity_id"],
+                claim["to_entity_id"],
+                relation_type,
+                claim["confidence_level"],
+                claim["confidence_score"],
+                claim_id,
+                reason,
+                operator,
+                history_relationship_id,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE relationship_claim
+            SET relation_status = 'verified', updated_at = CURRENT_TIMESTAMP
+            WHERE claim_id = ?
+            """,
+            (claim_id,),
+        )
+        _write_decision_and_audit(
+            connection,
+            relationship_id=relationship_id,
+            claim_id=claim_id,
+            action_type="supersede",
+            before_relation_type=old_relationship["relation_type"],
+            after_relation_type=relation_type,
+            before_status=old_relationship["relation_status"],
+            after_status="verified",
+            reason=reason,
+            operator=operator,
+        )
+        connection.execute(
+            """
+            INSERT INTO audit_log (
+                audit_id, object_type, object_id, action_type, before_value,
+                after_value, operator, reason
+            )
+            VALUES (?, 'relationship_claim', ?, 'supersede', ?, 'verified', ?, ?)
+            """,
+            (
+                new_id("AUD"),
+                claim_id,
+                claim["relation_status"],
+                operator,
+                reason,
+            ),
+        )
+        connection.commit()
+        row = connection.execute(
+            "SELECT * FROM curated_relationship WHERE relationship_id = ?",
+            (relationship_id,),
+        ).fetchone()
+        result = dict(row)
+        result["history_relationship_id"] = history_relationship_id
+        return result
+
+
+def mark_claim_pending_verify(
+    claim_id: str,
+    *,
+    reason: str,
+    operator: str,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Mark a claim for further verification without changing history."""
+
+    with get_connection(db_path) as connection:
+        claim = _fetch_claim_or_raise(connection, claim_id)
+        after_status = "pending_verify"
+        connection.execute(
+            """
+            UPDATE relationship_claim
+            SET relation_status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE claim_id = ?
+            """,
+            (after_status, claim_id),
+        )
+        _write_claim_decision_and_audit(
+            connection,
+            claim=claim,
+            relationship_id=None,
+            action_type="mark_pending_verify",
+            after_status=after_status,
+            reason=reason,
+            operator=operator,
+        )
+        connection.commit()
+        return {"claim_id": claim_id, "relation_status": after_status}
 
 
 def create_manual_relationship(
