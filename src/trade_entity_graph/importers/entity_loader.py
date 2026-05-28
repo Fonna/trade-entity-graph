@@ -76,6 +76,24 @@ def _insert_alias(
     return True
 
 
+def _record_import_entity(
+    connection: sqlite3.Connection,
+    *,
+    run_id: str,
+    entity_id: str,
+    row: ImportSourceRow,
+) -> None:
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO import_entity (
+            run_id, entity_id, source_file, source_sheet, source_row
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (run_id, entity_id, row.source_file, row.source_sheet, row.source_row),
+    )
+
+
 def load_entities(
     connection: sqlite3.Connection,
     rows: list[ImportSourceRow],
@@ -128,6 +146,7 @@ def load_entities(
                 ),
             )
         seen_entities.add(entity_id)
+        _record_import_entity(connection, run_id=run_id, entity_id=entity_id, row=row)
 
         aliases = (
             (get_value(row.values, "original_name"), "original_name"),

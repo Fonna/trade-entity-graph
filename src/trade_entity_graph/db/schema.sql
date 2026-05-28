@@ -66,6 +66,16 @@ CREATE TABLE IF NOT EXISTS entity_alias (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS import_entity (
+    run_id TEXT NOT NULL REFERENCES import_batch(run_id),
+    entity_id TEXT NOT NULL REFERENCES entity(entity_id),
+    source_file TEXT,
+    source_sheet TEXT,
+    source_row INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (run_id, entity_id)
+);
+
 CREATE TABLE IF NOT EXISTS order_evidence (
     evidence_id TEXT PRIMARY KEY,
     order_id TEXT,
@@ -181,6 +191,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_entity_canonical_name ON entity(canonical_name);
 CREATE INDEX IF NOT EXISTS idx_entity_alias_name ON entity_alias(alias_name);
+CREATE INDEX IF NOT EXISTS idx_import_entity_run ON import_entity(run_id);
 CREATE INDEX IF NOT EXISTS idx_import_source_file_run ON import_source_file(run_id);
 CREATE INDEX IF NOT EXISTS idx_import_error_run ON import_error(run_id);
 CREATE INDEX IF NOT EXISTS idx_import_error_type ON import_error(error_type);

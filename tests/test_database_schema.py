@@ -10,6 +10,7 @@ EXPECTED_TABLES = {
     "entity",
     "entity_alias",
     "import_batch",
+    "import_entity",
     "import_error",
     "import_source_file",
     "order_evidence",
@@ -27,6 +28,7 @@ EXPECTED_INDEXES = {
     "idx_import_error_run",
     "idx_import_error_severity",
     "idx_import_error_type",
+    "idx_import_entity_run",
     "idx_import_source_file_run",
     "idx_order_role_edge_from",
     "idx_order_role_edge_role_pair",
@@ -81,6 +83,26 @@ def test_entity_schema_has_run_id_for_import_traceability(tmp_path) -> None:
     assert "run_id" in columns
 
 
+def test_import_entity_schema_tracks_run_entity_membership(tmp_path) -> None:
+    db_path = initialize_database(tmp_path / "trade_entity_graph.db")
+
+    with get_connection(db_path) as connection:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(import_entity)")
+        }
+        indexes = _sqlite_objects(connection, "index")
+
+    assert {
+        "run_id",
+        "entity_id",
+        "source_file",
+        "source_sheet",
+        "source_row",
+        "created_at",
+    }.issubset(columns)
+    assert "idx_import_entity_run" in indexes
+
+
 def test_initialize_database_adds_missing_entity_run_id_column(tmp_path) -> None:
     db_path = tmp_path / "legacy_trade_entity_graph.db"
     with get_connection(db_path) as connection:
@@ -109,6 +131,35 @@ def test_initialize_database_adds_missing_entity_run_id_column(tmp_path) -> None
         columns = {row["name"] for row in connection.execute("PRAGMA table_info(entity)")}
 
     assert "run_id" in columns
+
+
+def test_initialize_database_adds_missing_import_entity_table_to_legacy_db(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "legacy_trade_entity_graph.db"
+    with get_connection(db_path) as connection:
+        connection.execute(
+            "CREATE TABLE import_batch (run_id TEXT PRIMARY KEY, source_file TEXT NOT NULL)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE entity (
+                entity_id TEXT PRIMARY KEY,
+                canonical_name TEXT NOT NULL,
+                run_id TEXT REFERENCES import_batch(run_id)
+            )
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+
+    with get_connection(db_path) as connection:
+        tables = _sqlite_objects(connection, "table")
+        indexes = _sqlite_objects(connection, "index")
+
+    assert "import_entity" in tables
+    assert "idx_import_entity_run" in indexes
 
 
 def test_get_connection_enables_foreign_keys(tmp_path) -> None:

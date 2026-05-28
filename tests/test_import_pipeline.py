@@ -746,6 +746,86 @@ def test_canonical_name_only_entity_import_counts_detail_entity(tmp_path, monkey
     assert entity["run_id"] == result.run_id
 
 
+def test_reused_canonical_name_only_entity_counts_in_import_detail(
+    tmp_path, monkeypatch
+) -> None:
+    run1_entities_path = tmp_path / "run1_entities.csv"
+    run2_entities_path = tmp_path / "run2_entities.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame({"canonical_name": ["ACME TRADING"]}).to_csv(
+        run1_entities_path, index=False
+    )
+    pd.DataFrame({"canonical_name": ["ACME TRADING"]}).to_csv(
+        run2_entities_path, index=False
+    )
+
+    run1 = run_import(
+        ImportInputs(entities_path=run1_entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+    run2 = run_import(
+        ImportInputs(entities_path=run2_entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+    detail = get_import_batch_detail(run2.run_id, db_path=db_path)
+
+    with get_connection(db_path) as connection:
+        stored_entity_count = connection.execute("SELECT COUNT(*) FROM entity").fetchone()[0]
+        memberships = connection.execute(
+            """
+            SELECT run_id, COUNT(*) AS count
+            FROM import_entity
+            GROUP BY run_id
+            ORDER BY run_id
+            """
+        ).fetchall()
+
+    assert run1.entity_count == 1
+    assert run2.entity_count == 1
+    assert stored_entity_count == 1
+    assert detail["counts"]["entities"] == 1
+    assert {row["run_id"]: row["count"] for row in memberships} == {
+        run1.run_id: 1,
+        run2.run_id: 1,
+    }
+
+
+def test_reused_entity_with_new_alias_counts_in_import_detail(
+    tmp_path, monkeypatch
+) -> None:
+    run1_entities_path = tmp_path / "run1_entities.csv"
+    run2_entities_path = tmp_path / "run2_entities.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame({"canonical_name": ["ACME TRADING"]}).to_csv(
+        run1_entities_path, index=False
+    )
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING"],
+            "alias_name": ["Acme Trading Export"],
+        }
+    ).to_csv(run2_entities_path, index=False)
+
+    run_import(
+        ImportInputs(entities_path=run1_entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+    result = run_import(
+        ImportInputs(entities_path=run2_entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+    detail = get_import_batch_detail(result.run_id, db_path=db_path)
+
+    assert result.entity_count == 1
+    assert result.alias_count == 1
+    assert detail["counts"]["entities"] == 1
+    assert detail["counts"]["aliases"] == 1
+
+
 def test_run_import_defaults_field_mapping_version_to_loaded_mapping(tmp_path, monkeypatch) -> None:
     entities_path = tmp_path / "entities.csv"
     db_path = tmp_path / "trade_entity_graph.db"

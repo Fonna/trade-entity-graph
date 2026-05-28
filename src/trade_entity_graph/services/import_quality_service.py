@@ -101,8 +101,17 @@ def _quality_summary(connection: Any, run_id: str) -> dict[str, Any]:
 
 def _entity_count(connection: Any, run_id: str) -> int:
     row = connection.execute(
-        "SELECT COUNT(*) AS count FROM entity WHERE run_id = ?",
-        (run_id,),
+        """
+        SELECT COUNT(DISTINCT entity_id) AS count
+        FROM (
+            SELECT entity_id FROM import_entity WHERE run_id = ?
+            UNION
+            SELECT entity_id FROM entity WHERE run_id = ?
+            UNION
+            SELECT entity_id FROM entity_alias WHERE run_id = ?
+        )
+        """,
+        (run_id, run_id, run_id),
     ).fetchone()
     return row["count"]
 
