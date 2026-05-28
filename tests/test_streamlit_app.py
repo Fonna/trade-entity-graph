@@ -650,6 +650,47 @@ def test_import_tab_detail_does_not_export_without_explicit_click(monkeypatch) -
     assert fake_st.downloads == []
 
 
+def test_import_tab_selected_run_detail_failure_reports_error(monkeypatch) -> None:
+    fake_st = ImportQualityFakeStreamlit(
+        selected_run_id="RUN_MISSING",
+        buttons={"\u5f00\u59cb\u5bfc\u5165": False},
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app, "list_import_batches", lambda **_kwargs: {"items": []})
+
+    def raise_unknown_batch(run_id: str):
+        raise ValueError(f"Unknown import batch: {run_id}")
+
+    monkeypatch.setattr(streamlit_app, "get_import_batch_detail", raise_unknown_batch)
+
+    streamlit_app.render_import_tab()
+
+    assert any("Unknown import batch" in message for message in fake_st.errors)
+
+
+def test_import_tab_selected_run_error_list_failure_reports_error(monkeypatch) -> None:
+    fake_st = ImportQualityFakeStreamlit(
+        selected_run_id="RUN_DETAIL",
+        buttons={"\u5f00\u59cb\u5bfc\u5165": False},
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app, "list_import_batches", lambda **_kwargs: {"items": []})
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_import_batch_detail",
+        lambda run_id: {"quality_summary": {}, "archived_files": [], "counts": {"orders": 2}},
+    )
+
+    def raise_error_list_failed(run_id: str, **_kwargs):
+        raise RuntimeError("error list failed")
+
+    monkeypatch.setattr(streamlit_app, "list_import_errors", raise_error_list_failed)
+
+    streamlit_app.render_import_tab()
+
+    assert any("error list failed" in message for message in fake_st.errors)
+
+
 def test_import_tab_detail_exports_after_explicit_click(monkeypatch, tmp_path) -> None:
     export_path = tmp_path / "RUN_DETAIL_import_errors.csv"
     export_path.write_text("row_number,error_type\n3,missing_entity\n", encoding="utf-8")
@@ -682,6 +723,35 @@ def test_import_tab_detail_exports_after_explicit_click(monkeypatch, tmp_path) -
     assert calls == [("export", "RUN_DETAIL")]
     assert fake_st.downloads[0]["file_name"] == "RUN_DETAIL_import_errors.csv"
     assert fake_st.downloads[0]["data"] == export_path.read_bytes()
+
+
+def test_import_tab_export_failure_after_explicit_click_reports_error(monkeypatch) -> None:
+    fake_st = ImportQualityFakeStreamlit(
+        selected_run_id="RUN_DETAIL",
+        buttons={"\u5f00\u59cb\u5bfc\u5165": False, "\u751f\u6210\u5f02\u5e38 CSV": True},
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app, "list_import_batches", lambda **_kwargs: {"items": []})
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_import_batch_detail",
+        lambda run_id: {"quality_summary": {}, "archived_files": [], "counts": {"orders": 2}},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_errors",
+        lambda run_id, **_kwargs: {"items": [{"row_number": 3, "error_type": "missing_entity"}]},
+    )
+
+    def raise_export_failed(run_id: str):
+        raise RuntimeError("export failed")
+
+    monkeypatch.setattr(streamlit_app, "export_import_errors", raise_export_failed)
+
+    streamlit_app.render_import_tab()
+
+    assert any("export failed" in message for message in fake_st.errors)
+
 
 def test_review_queue_tab_displays_queue_and_sets_selected_claim(monkeypatch) -> None:
     class FakeColumn:
