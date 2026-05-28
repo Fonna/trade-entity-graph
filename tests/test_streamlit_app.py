@@ -439,6 +439,13 @@ def test_final_relation_type_for_candidate_maps_known_candidate_types() -> None:
 
 
 def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) -> None:
+    class FakeExpander:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
     class FakeStreamlit:
         def __init__(self) -> None:
             self.json_payloads: list[dict] = []
@@ -456,6 +463,15 @@ def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) ->
             return None
 
         def info(self, *_args, **_kwargs) -> None:
+            return None
+
+        def markdown(self, *_args, **_kwargs) -> None:
+            return None
+
+        def expander(self, *_args, **_kwargs) -> FakeExpander:
+            return FakeExpander()
+
+        def download_button(self, *_args, **_kwargs) -> None:
             return None
 
         def dataframe(self, *_args, **_kwargs) -> None:
@@ -478,6 +494,14 @@ def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) ->
             claim_count=0,
             skipped_rows=[],
             archived_files=[],
+            import_errors=[],
+            warning_count=0,
+            error_count=0,
+            quality_summary={
+                "blocking_error_count": 0,
+                "warning_count": 0,
+                "error_count_by_type": {},
+            },
         ),
     )
 
@@ -508,6 +532,11 @@ def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) ->
         "apply_history_reuse_to_claims",
         fake_apply_history_reuse_to_claims,
         raising=False,
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_batches",
+        lambda **_kwargs: {"items": []},
     )
 
     streamlit_app.render_import_tab()
@@ -996,3 +1025,27 @@ def test_entity_reference_summary_includes_name_when_available() -> None:
     assert streamlit_app.format_entity_reference(None, fallback_id="ENT_MISSING") == (
         "未找到企业：ENT_MISSING"
     )
+
+def test_import_quality_status_label_distinguishes_errors_and_warnings() -> None:
+    assert (
+        streamlit_app.format_import_quality_status(
+            {"blocking_error_count": 0, "warning_count": 0}
+        )
+        == "无异常"
+    )
+    assert (
+        streamlit_app.format_import_quality_status(
+            {"blocking_error_count": 0, "warning_count": 2}
+        )
+        == "仅警告：2 条"
+    )
+    assert (
+        streamlit_app.format_import_quality_status(
+            {"blocking_error_count": 3, "warning_count": 2}
+        )
+        == "阻断异常：3 条，警告：2 条"
+    )
+
+
+def test_import_error_export_filename_uses_run_id() -> None:
+    assert streamlit_app.import_error_export_filename("RUN_ABC") == "RUN_ABC_import_errors.csv"

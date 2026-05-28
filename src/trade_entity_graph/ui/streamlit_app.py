@@ -17,6 +17,12 @@ from trade_entity_graph.services.entity_service import get_entity_detail, search
 from trade_entity_graph.services.export_service import export_relationship_rows
 from trade_entity_graph.services.graph_service import get_ego_graph
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
+from trade_entity_graph.services.import_quality_service import (
+    export_import_errors,
+    get_import_batch_detail,
+    list_import_batches,
+    list_import_errors,
+)
 from trade_entity_graph.services.relationship_service import (
     aggregate_relationship_claims,
     generate_order_role_edges,
@@ -125,6 +131,23 @@ TABLE_COLUMN_LABELS: dict[str, str] = {
     "role_pair_summary": "角色组合",
     "destination_summary": "目的国摘要",
     "product_summary": "产品摘要",
+    "source_role": "来源角色",
+    "original_path": "原始路径",
+    "archived_path": "归档路径",
+    "success_rows": "成功行数",
+    "error_rows": "异常行数",
+    "warning_rows": "警告行数",
+    "blocking_error_count": "阻断异常数",
+    "warning_count": "警告数",
+    "file_role": "文件角色",
+    "sheet_name": "工作表",
+    "row_number": "行号",
+    "column_name": "列名",
+    "normalized_field": "标准字段",
+    "raw_value": "原始值",
+    "error_type": "异常类型",
+    "severity": "严重级别",
+    "message": "异常说明",
 }
 DISPLAY_VALUE_LABELS: dict[str, dict[str, str]] = {
     "entity_type": {
@@ -172,6 +195,15 @@ DISPLAY_VALUE_LABELS: dict[str, dict[str, str]] = {
         "relationship_claim": "候选关系",
         "curated_relationship": "最终关系",
         "order_role_edge": "订单角色边",
+    },
+    "severity": {"blocking": "阻断异常", "warning": "警告"},
+    "error_type": {
+        "missing_required_field": "缺少必需字段",
+        "missing_required_value": "必填值为空",
+        "unknown_entity_reference": "企业无法匹配",
+        "invalid_numeric_value": "数值格式错误",
+        "invalid_relationship_pair": "无效关系企业对",
+        "field_mapping_error": "字段映射警告",
     },
 }
 ERROR_MESSAGE_PREFIXES: tuple[tuple[str, str], ...] = (
@@ -392,6 +424,22 @@ def localize_table_records(records: Any) -> Any:
             }
         )
     return localized_rows
+
+
+def format_import_quality_status(summary: dict[str, Any]) -> str:
+    """Return a short Chinese status label for an import quality summary."""
+    blocking_count = int(summary.get("blocking_error_count") or 0)
+    warning_count = int(summary.get("warning_count") or 0)
+    if blocking_count == 0 and warning_count == 0:
+        return "无异常"
+    if blocking_count == 0:
+        return f"仅警告：{warning_count} 条"
+    return f"阻断异常：{blocking_count} 条，警告：{warning_count} 条"
+
+
+def import_error_export_filename(run_id: str) -> str:
+    """Return the CSV filename used for one import error export."""
+    return f"{run_id}_import_errors.csv"
 
 
 def format_error_message(error: Exception) -> str:
@@ -821,6 +869,48 @@ def render_import_tab() -> None:
         st.json(
             {**result.__dict__, **edge_result, **claim_result, "history_reuse": history_reuse}
         )
+        quality_summary = getattr(result, "quality_summary", None)
+        if quality_summary:
+            st.markdown("**导入质量摘要**")
+            st.info(format_import_quality_status(quality_summary))
+            error_count_by_type = quality_summary.get("error_count_by_type") or {}
+            show_table(
+                [
+                    {"error_type": error_type, "count": count}
+                    for error_type, count in error_count_by_type.items()
+                ]
+            )
+        import_errors = getattr(result, "import_errors", None)
+        if import_errors:
+            with st.expander("查看本次导入异常"):
+                show_table(import_errors)
+
+    st.markdown("---")
+    st.subheader("最近导入批次")
+    batches = list_import_batches(limit=10)
+    show_table(batches.get("items", []))
+    selected_run_id = st.text_input("查看批次详情的 run_id")
+    if selected_run_id:
+        detail = get_import_batch_detail(selected_run_id)
+        st.markdown("**批次质量状态**")
+        st.info(format_import_quality_status(detail.get("quality_summary", {})))
+        st.markdown("**归档文件**")
+        show_table(detail.get("archived_files", []))
+        st.markdown("**导入计数**")
+        st.json(detail.get("counts", {}))
+        error_result = list_import_errors(selected_run_id, limit=500)
+        error_items = error_result.get("items", [])
+        st.markdown("**导入异常**")
+        show_table(error_items)
+        if error_items:
+            export_result = export_import_errors(selected_run_id)
+            export_path = Path(str(export_result["path"]))
+            st.download_button(
+                "下载异常 CSV",
+                data=export_path.read_bytes(),
+                file_name=import_error_export_filename(selected_run_id),
+                mime="text/csv",
+            )
 
 
 def render_search_tab() -> None:
