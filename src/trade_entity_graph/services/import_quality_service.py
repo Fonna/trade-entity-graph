@@ -100,16 +100,11 @@ def _quality_summary(connection: Any, run_id: str) -> dict[str, Any]:
 
 
 def _entity_count(connection: Any, run_id: str) -> int:
-    rows = connection.execute(
-        """
-        SELECT entity_id
-        FROM entity_alias
-        WHERE run_id = ?
-        GROUP BY entity_id
-        """,
+    row = connection.execute(
+        "SELECT COUNT(*) AS count FROM entity WHERE run_id = ?",
         (run_id,),
-    ).fetchall()
-    return len(rows)
+    ).fetchone()
+    return row["count"]
 
 
 def _batch_status_sql() -> str:

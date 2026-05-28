@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS entity (
     country TEXT,
     entity_type TEXT,
     tags TEXT,
+    run_id TEXT REFERENCES import_batch(run_id),
     status TEXT DEFAULT 'active',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP

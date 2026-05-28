@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from trade_entity_graph.importers.field_mapping import DEFAULT_FIELD_MAPPING
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -38,5 +40,7 @@ def get_settings() -> Settings:
         import_archive_root=import_archive_root,
         import_operator=os.getenv("TEG_IMPORT_OPERATOR", "local_user"),
         rule_version=os.getenv("TEG_RULE_VERSION", "mvp-0.1"),
-        field_mapping_version=os.getenv("TEG_FIELD_MAPPING_VERSION", "mvp-0.1"),
+        field_mapping_version=os.getenv(
+            "TEG_FIELD_MAPPING_VERSION", DEFAULT_FIELD_MAPPING["version"]
+        ),
     )

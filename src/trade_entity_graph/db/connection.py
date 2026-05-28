@@ -11,6 +11,9 @@ SCHEMA_COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
     "import_batch": {
         "warning_rows": "INTEGER DEFAULT 0",
     },
+    "entity": {
+        "run_id": "TEXT REFERENCES import_batch(run_id)",
+    },
     "order_evidence": {
         "customer_name": "TEXT",
         "shipper_name": "TEXT",

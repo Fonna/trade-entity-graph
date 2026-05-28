@@ -116,14 +116,15 @@ def load_entities(
             entity_id = new_id("ENT")
             connection.execute(
                 """
-                INSERT INTO entity (entity_id, canonical_name, country, entity_type)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO entity (entity_id, canonical_name, country, entity_type, run_id)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     entity_id,
                     canonical_name,
                     get_value(row.values, "country"),
                     get_value(row.values, "entity_type"),
+                    run_id,
                 ),
             )
         seen_entities.add(entity_id)

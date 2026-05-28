@@ -72,6 +72,45 @@ def test_import_error_schema_has_traceability_columns(tmp_path) -> None:
     }.issubset(columns)
 
 
+def test_entity_schema_has_run_id_for_import_traceability(tmp_path) -> None:
+    db_path = initialize_database(tmp_path / "trade_entity_graph.db")
+
+    with get_connection(db_path) as connection:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(entity)")}
+
+    assert "run_id" in columns
+
+
+def test_initialize_database_adds_missing_entity_run_id_column(tmp_path) -> None:
+    db_path = tmp_path / "legacy_trade_entity_graph.db"
+    with get_connection(db_path) as connection:
+        connection.execute(
+            "CREATE TABLE import_batch (run_id TEXT PRIMARY KEY, source_file TEXT NOT NULL)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE entity (
+                entity_id TEXT PRIMARY KEY,
+                canonical_name TEXT NOT NULL,
+                country TEXT,
+                entity_type TEXT,
+                tags TEXT,
+                status TEXT DEFAULT 'active',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.commit()
+
+    initialize_database(db_path)
+
+    with get_connection(db_path) as connection:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(entity)")}
+
+    assert "run_id" in columns
+
+
 def test_get_connection_enables_foreign_keys(tmp_path) -> None:
     db_path = initialize_database(tmp_path / "trade_entity_graph.db")
 

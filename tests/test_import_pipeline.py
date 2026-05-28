@@ -4,8 +4,10 @@ import pandas as pd
 import pytest
 
 from trade_entity_graph.db.connection import get_connection
+from trade_entity_graph.importers.field_mapping import DEFAULT_FIELD_MAPPING
 from trade_entity_graph.importers.models import ImportErrorRecord, ImportInputs
 from trade_entity_graph.importers.pipeline import _error_row_count, run_import
+from trade_entity_graph.services.import_quality_service import get_import_batch_detail
 
 
 def test_run_import_loads_entities_orders_and_role_names(tmp_path, monkeypatch) -> None:
@@ -717,3 +719,70 @@ def test_run_import_preserves_success_rows_when_later_file_read_fails(
     assert errors[0]["file_role"] == "orders"
     assert errors[0]["error_type"] == "file_read_error"
     assert errors[0]["severity"] == "blocking"
+
+
+def test_canonical_name_only_entity_import_counts_detail_entity(tmp_path, monkeypatch) -> None:
+    entities_path = tmp_path / "entities.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame({"canonical_name": ["ACME TRADING"]}).to_csv(entities_path, index=False)
+
+    result = run_import(
+        ImportInputs(entities_path=entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+    detail = get_import_batch_detail(result.run_id, db_path=db_path)
+
+    with get_connection(db_path) as connection:
+        entity = connection.execute(
+            "SELECT canonical_name, run_id FROM entity WHERE canonical_name = 'ACME TRADING'"
+        ).fetchone()
+
+    assert result.entity_count == 1
+    assert result.alias_count == 0
+    assert detail["counts"]["entities"] == 1
+    assert detail["counts"]["aliases"] == 0
+    assert entity["run_id"] == result.run_id
+
+
+def test_run_import_defaults_field_mapping_version_to_loaded_mapping(tmp_path, monkeypatch) -> None:
+    entities_path = tmp_path / "entities.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.delenv("TEG_FIELD_MAPPING_VERSION", raising=False)
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+    pd.DataFrame({"canonical_name": ["ACME TRADING"]}).to_csv(entities_path, index=False)
+
+    result = run_import(
+        ImportInputs(entities_path=entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        field_mapping_version = connection.execute(
+            "SELECT field_mapping_version FROM import_batch WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()["field_mapping_version"]
+
+    assert field_mapping_version == DEFAULT_FIELD_MAPPING["version"]
+
+
+def test_run_import_allows_env_field_mapping_version_override(tmp_path, monkeypatch) -> None:
+    entities_path = tmp_path / "entities.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_FIELD_MAPPING_VERSION", "custom-v9")
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+    pd.DataFrame({"canonical_name": ["ACME TRADING"]}).to_csv(entities_path, index=False)
+
+    result = run_import(
+        ImportInputs(entities_path=entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        field_mapping_version = connection.execute(
+            "SELECT field_mapping_version FROM import_batch WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()["field_mapping_version"]
+
+    assert field_mapping_version == "custom-v9"
