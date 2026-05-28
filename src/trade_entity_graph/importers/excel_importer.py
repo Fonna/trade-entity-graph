@@ -57,7 +57,7 @@ def inspect_workbook(path: str | Path) -> dict[str, object]:
             }
         ]
     else:
-        raise ValueError(f"Unsupported import file suffix: {target.suffix}")
+        raise ValueError(f"不支持的导入文件后缀：{target.suffix}")
 
     return {"path": str(target), "name": target.name, "suffix": target.suffix, "sheets": sheets}
 
@@ -80,4 +80,4 @@ def read_tabular_rows(path: str | Path, sheet_name: str | None = None) -> list[I
         frame = pd.read_csv(target)
         return _dataframe_to_rows(frame, target, target.stem)
 
-    raise ValueError(f"Unsupported import file suffix: {target.suffix}")
+    raise ValueError(f"不支持的导入文件后缀：{target.suffix}")

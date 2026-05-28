@@ -156,14 +156,14 @@ flowchart TD
 
 ## 当前开发状态
 
-截至 2026-05-25，当前分支已包含 M2-M8 P0 闭环、原始文件归档能力和演示验收数据包。最近一次验证：
+截至 2026-05-28，当前分支已包含 M2-M8 P0 闭环、原始文件归档能力、历史关系复用、全局待审核队列、中文 Streamlit 工作台和演示验收数据包。最近一次验证：
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-验证结果：`18 passed`，ruff `All checks passed!`。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
+验证结果：`101 passed`，ruff `All checks passed!`。
 
 ## 推荐开发顺序
 
@@ -173,8 +173,8 @@ uv --cache-dir .uv-cache run ruff check .
 4. M3：订单角色边生成和聚合统计。
 5. M4：关系候选生成、评分和推荐理由。
 6. M5：NetworkX 局部图查询服务。
-7. M6：FastAPI 搜索、图谱、详情、审核和导出接口。
-8. M7：Streamlit MVP 页面。
+7. M6：FastAPI 搜索、图谱、详情、审核、全局待审核队列和导出接口。
+8. M7：Streamlit MVP 页面与待审核队列工作台。
 9. M8：人工审核写回、审计和验收演示。
 
 ## 远程仓库

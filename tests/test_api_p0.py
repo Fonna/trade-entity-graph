@@ -510,7 +510,7 @@ def test_relationship_api_confirm_rejects_candidate_with_unapplied_history(
     )
 
     assert 400 <= status < 500
-    assert "history-aware review action" in payload["detail"]
+    assert "请使用历史关系相关的审核动作" in payload["detail"]
     with get_connection(db_path) as connection:
         claim_relationship_count = connection.execute(
             """
@@ -588,7 +588,7 @@ def test_relationship_api_invalid_action_type_returns_json_4xx(
         },
     )
     assert 400 <= status < 500
-    assert payload["detail"]
+    assert "不支持的审核动作" in payload["detail"]
 
 
 def test_relationship_api_supersede_history_requires_relation_type(
@@ -647,7 +647,7 @@ def test_relationship_api_supersede_history_requires_relation_type(
         },
     )
     assert status == 422
-    assert payload["detail"]
+    assert payload["detail"] == "关系类型为必填项"
 
 
 def test_relationship_api_mark_pending_verify_updates_claim(tmp_path, monkeypatch) -> None:
@@ -958,7 +958,67 @@ def test_relationship_api_ordinary_decision_requires_relation_type(
         },
     )
     assert status == 422
-    assert payload["detail"]
+    assert payload["detail"] == "关系类型为必填项"
+
+
+def test_reviews_queue_api_lists_pending_claims(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-review-queue.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_QUEUE', 'api-queue.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_QUEUE_FROM', 'ACME TRADING', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type)
+            VALUES ('ENT_QUEUE_TO', 'BETA FACTORY', 'company')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id, from_entity_id, to_entity_id, candidate_relation_type,
+                relation_status, confidence_level, confidence_score, order_count,
+                total_teu, recommendation_reason, run_id
+            )
+            VALUES (
+                'CLM_API_QUEUE', 'ENT_QUEUE_FROM', 'ENT_QUEUE_TO',
+                'trading_partner_candidate', 'history_conflict', 'high', 0.91,
+                8, 32.5, '8 orders, 32.5 TEU', 'RUN_API_QUEUE'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+
+    status, payload = _request(
+        app,
+        "GET",
+        "/reviews/queue",
+        query={
+            "status": "history_conflict,candidate",
+            "confidence_level": "high",
+            "q": "acme",
+        },
+    )
+
+    assert status == 200
+    assert payload["summary"]["total_count"] == 1
+    assert payload["items"][0]["claim_id"] == "CLM_API_QUEUE"
+    assert payload["items"][0]["from_name"] == "ACME TRADING"
 
 
 def test_import_endpoint_applies_history_reuse_to_imported_claims_without_aggregation(

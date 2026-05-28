@@ -290,7 +290,7 @@ def test_decide_relationship_rejects_candidate_with_unapplied_effective_history(
     db_path = tmp_path / "history-review.db"
     claim_id, history_id = _seed_candidate_with_effective_history(db_path)
 
-    with pytest.raises(ValueError, match="history-aware review action"):
+    with pytest.raises(ValueError, match="审核动作"):
         decide_relationship(
             claim_id,
             action_type="confirm",
@@ -412,7 +412,7 @@ def test_keep_history_for_claim_accepts_history_matched_claim(tmp_path) -> None:
         db_path=db_path,
     )
 
-    with pytest.raises(ValueError, match="already finalized|unfinalized"):
+    with pytest.raises(ValueError, match="历史审核定稿|未定稿"):
         keep_history_for_claim(
             claim_id,
             reason="Duplicate keep history",
@@ -711,7 +711,7 @@ def test_supersede_history_with_claim_rejects_unrelated_old_relationship(tmp_pat
         )
         connection.commit()
 
-    with pytest.raises(ValueError, match="current-effective and match the claim pair"):
+    with pytest.raises(ValueError, match="仍然有效"):
         supersede_history_with_claim(
             claim_id,
             old_relationship_id=unrelated_id,
@@ -756,7 +756,7 @@ def test_supersede_history_with_claim_rejects_deprecated_old_relationship(tmp_pa
         )
         connection.commit()
 
-    with pytest.raises(ValueError, match="current-effective and match the claim pair"):
+    with pytest.raises(ValueError, match="仍然有效"):
         supersede_history_with_claim(
             claim_id,
             old_relationship_id=deprecated_id,
@@ -842,7 +842,7 @@ def test_supersede_history_with_claim_rejects_existing_claim_relationship(tmp_pa
         existing_id = _insert_reviewed_relationship_for_claim(connection, claim_id)
         connection.commit()
 
-    with pytest.raises(ValueError, match="already has a reviewed relationship"):
+    with pytest.raises(ValueError, match="审核后的最终关系"):
         supersede_history_with_claim(
             claim_id,
             old_relationship_id=history_id,
@@ -883,7 +883,7 @@ def test_supersede_history_with_claim_rejects_existing_final_history_decision(
         _insert_decision(connection, claim_id, history_id, action_type="keep_history")
         connection.commit()
 
-    with pytest.raises(ValueError, match="already finalized"):
+    with pytest.raises(ValueError, match="历史审核定稿"):
         supersede_history_with_claim(
             claim_id,
             old_relationship_id=history_id,
@@ -919,7 +919,7 @@ def test_keep_history_for_claim_rejects_claim_with_ordinary_decision(tmp_path) -
         existing_id = _insert_reviewed_relationship_for_claim(connection, claim_id)
         connection.commit()
 
-    with pytest.raises(ValueError, match="already has a reviewed relationship"):
+    with pytest.raises(ValueError, match="审核后的最终关系"):
         keep_history_for_claim(
             claim_id,
             reason="Should not keep history after ordinary review",
@@ -981,7 +981,7 @@ def test_mark_claim_pending_verify_rejects_claim_with_ordinary_decision(tmp_path
         existing_id = _insert_reviewed_relationship_for_claim(connection, claim_id)
         connection.commit()
 
-    with pytest.raises(ValueError, match="already has a reviewed relationship"):
+    with pytest.raises(ValueError, match="审核后的最终关系"):
         mark_claim_pending_verify(
             claim_id,
             reason="Should not mark pending after ordinary review",
@@ -1155,7 +1155,7 @@ def test_mark_claim_pending_verify_rejects_claim_after_keep_history(tmp_path) ->
         db_path=db_path,
     )
 
-    with pytest.raises(ValueError, match="already finalized"):
+    with pytest.raises(ValueError, match="历史审核定稿"):
         mark_claim_pending_verify(
             claim_id,
             reason="Should not reopen finalized keep-history claim",
@@ -1289,7 +1289,7 @@ def test_keep_history_for_claim_unknown_claim_raises_unknown_claim_error(tmp_pat
     db_path = tmp_path / "history-review.db"
     initialize_database(db_path)
 
-    with pytest.raises(ValueError, match="Unknown relationship claim"):
+    with pytest.raises(ValueError, match="未找到候选关系"):
         keep_history_for_claim(
             "CLM_MISSING",
             reason="Cannot keep history for unknown claim",

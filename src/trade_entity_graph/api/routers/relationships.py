@@ -47,7 +47,7 @@ class ManualRelationshipRequest(BaseModel):
 def get_relationship_endpoint(relationship_id: str) -> dict[str, object]:
     detail = get_relationship_detail(relationship_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail="Relationship not found")
+        raise HTTPException(status_code=404, detail="未找到关系或候选关系")
     return detail
 
 
@@ -61,7 +61,7 @@ def decide_relationship_endpoint(
     relationship_id: str, request: DecisionRequest
 ) -> dict[str, object]:
     if request.action_type not in HISTORY_ACTIONS | ORDINARY_ACTIONS:
-        raise HTTPException(status_code=422, detail="Unsupported action_type")
+        raise HTTPException(status_code=422, detail="不支持的审核动作")
 
     try:
         if request.action_type == "keep_history":
@@ -78,7 +78,7 @@ def decide_relationship_endpoint(
             )
         if request.action_type == "supersede_history":
             if request.relation_type is None:
-                raise HTTPException(status_code=422, detail="relation_type is required")
+                raise HTTPException(status_code=422, detail="关系类型为必填项")
             return supersede_history_with_claim(
                 relationship_id,
                 old_relationship_id=request.old_relationship_id,
@@ -88,7 +88,7 @@ def decide_relationship_endpoint(
             )
 
         if request.relation_type is None:
-            raise HTTPException(status_code=422, detail="relation_type is required")
+            raise HTTPException(status_code=422, detail="关系类型为必填项")
         return decide_relationship(
             relationship_id,
             action_type=request.action_type,

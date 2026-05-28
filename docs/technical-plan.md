@@ -124,6 +124,7 @@ P0 字段能力：
 | `/relationships/{relationship_id}/evidence` | GET | 返回订单证据和人工记录 |
 | `/relationships/{relationship_id}/decision` | POST | 支持确认、否定、修改关系 |
 | `/relationships/manual` | POST | 支持人工新增关系 |
+| `/reviews/queue` | GET | P1，按状态、批次、关键词和置信等级查看全局待审核候选关系 |
 | `/exports/relationships` | POST | 导出关系明细 Excel/CSV |
 | `/imports/run` | POST | 触发导入、订单角色边生成和候选聚合，返回 `run_id`、统计信息和 `archived_files` |
 | `/paths?from=&to=` | GET | P1，返回两个企业之间的关系路径 |
@@ -179,6 +180,7 @@ MVP 使用 Streamlit 快速实现，后续可迁移 React + AntV G6/Cytoscape.js
 | 企业详情页 | 展示主体信息、别名、订单统计、关系统计、最近证据和最近人工决策 |
 | 关系图谱页 | 展示中心企业一跳关系，按节点类型、边类型、关系状态编码，默认隐藏 `rejected` |
 | 关系详情面板 | 点击边展示关系类型、状态、置信度、订单数、TEU、目的国、产品、证据和历史决策 |
+| 全局待审核队列 | 跨企业展示候选、历史匹配、历史冲突和待验证关系，支持按批次、关键词、状态和置信等级筛选；审核成功后自动刷新队列 |
 | 人工审核表单 | 确认、否定、修改关系类型、补充证据，提交时强制填写理由和操作人 |
 | 人工新增关系表单 | 选择两个企业并新增 `manual_only` 或 `verified` 关系 |
 | 导出按钮 | 导出当前中心企业关系明细，可选是否包含订单证据和人工决策 |
@@ -221,13 +223,14 @@ P0 测试优先覆盖闭环风险：
 
 ## 9. 当前开发记录
 
-截至 2026-05-22，`origin/main` 已完成 M2-M7 P0 闭环和导入源文件归档：
+截至 2026-05-28，当前分支已完成 M2-M8 P0 闭环、导入源文件归档、历史关系复用和中文工作台收口：
 
 - M2：导入企业、订单和已有关系候选，记录 `import_batch` 和 `import_source_file`。
 - M3/M4：生成 P0 订单角色边并聚合关系候选。
 - M5：提供实体、关系、图谱、审核和导出服务。
-- M6：提供 FastAPI P0 endpoint，`/imports/run` 返回 `archived_files`。
-- M7：提供中文 Streamlit 工作台，并在顶部展示基础逻辑与使用方法。
+- M6：提供 FastAPI P0 endpoint，`/imports/run` 返回 `archived_files`，并提供 `/reviews/queue` 全局待审核队列。
+- M7：提供中文 Streamlit 工作台，并在顶部展示基础逻辑与使用方法；表格字段和常见后端错误已面向业务用户中文化；新增待审核队列 tab 支持跨企业集中审核，审核成功后自动刷新队列。
+- M8：提供可重复生成的演示数据包、预置审核脚本和历史人工判断复用能力。
 
 最近一次验证：
 
@@ -236,7 +239,7 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-结果：全量测试 14 passed，ruff 0 errors。`.pytest_cache` 在当前桌面沙箱下可能出现写入权限 warning，不影响测试结果。
+结果：全量测试 101 passed，ruff 0 errors。
 
 ## 10. 后续演进
 

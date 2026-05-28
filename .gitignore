@@ -23,6 +23,11 @@ build/
 dist/
 *.egg-info/
 
+# Local runtime logs
+*.log
+*.err.log
+*.pid
+
 # Local business data and exports
 data/raw/*
 !data/raw/.gitkeep

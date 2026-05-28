@@ -10,12 +10,15 @@ def test_streamlit_app_exposes_mvp_tab_renderers() -> None:
     assert callable(streamlit_app.render_search_tab)
     assert callable(streamlit_app.render_graph_tab)
     assert callable(streamlit_app.render_relationship_detail_tab)
+    assert callable(streamlit_app.render_review_queue_tab)
     assert callable(streamlit_app.render_review_tab)
     assert callable(streamlit_app.render_export_tab)
     assert callable(streamlit_app.render_graph_svg)
     assert callable(streamlit_app.get_candidate_edges)
     assert callable(streamlit_app.get_selected_claim_id)
     assert callable(streamlit_app.set_selected_claim_id)
+    assert callable(streamlit_app.localize_table_records)
+    assert callable(streamlit_app.format_error_message)
 
 
 def test_streamlit_app_uses_chinese_tab_labels() -> None:
@@ -24,6 +27,7 @@ def test_streamlit_app_uses_chinese_tab_labels() -> None:
         "企业搜索",
         "关系图谱",
         "关系详情",
+        "待审核队列",
         "人工审核",
         "导出",
     ]
@@ -198,6 +202,21 @@ def test_candidate_edge_label_includes_entity_names_for_review_context() -> None
     )
 
 
+def test_review_queue_item_label_includes_priority_context() -> None:
+    label = streamlit_app.format_queue_item_label(
+        {
+            "claim_id": "CLM_QUEUE",
+            "from_name": "ACME TRADING",
+            "to_name": "BETA FACTORY",
+            "relation_status": "history_conflict",
+            "confidence_level": "high",
+            "order_count": 8,
+        }
+    )
+
+    assert label == "CLM_QUEUE | ACME TRADING -> BETA FACTORY | history_conflict | high | 8 orders"
+
+
 def test_graph_summary_counts_falls_back_to_payload_lengths() -> None:
     graph = {
         "nodes": [{"id": "ENT_1"}, {"id": "ENT_2"}],
@@ -238,6 +257,29 @@ def test_selected_claim_state_helpers_round_trip() -> None:
     assert streamlit_app.get_selected_claim_id(state=state) == "CLM_123"
 
 
+def test_review_success_refresh_state_clears_reviewed_claim() -> None:
+    state = {
+        streamlit_app.SELECTED_CLAIM_STATE_KEY: "CLM_123",
+        streamlit_app.REVIEW_CLAIM_WIDGET_KEY: "CLM_123",
+    }
+
+    streamlit_app.store_review_success_for_refresh(
+        "CLM_123",
+        {"relationship_id": "REL_123"},
+        state=state,
+    )
+    flash = streamlit_app.consume_review_refresh_state(state=state)
+
+    assert flash == {
+        "claim_id": "CLM_123",
+        "result": {"relationship_id": "REL_123"},
+    }
+    assert streamlit_app.SELECTED_CLAIM_STATE_KEY not in state
+    assert streamlit_app.REVIEW_CLAIM_WIDGET_KEY not in state
+    assert streamlit_app.REVIEW_CLEAR_CLAIM_STATE_KEY not in state
+    assert streamlit_app.REVIEW_SUCCESS_FLASH_STATE_KEY not in state
+
+
 def test_streamlit_app_exposes_graph_handoff_helpers() -> None:
     assert callable(streamlit_app.render_graph_svg)
     assert callable(streamlit_app.get_selected_claim_id)
@@ -259,6 +301,97 @@ def test_review_relation_type_options_are_controlled_final_values() -> None:
         "unknown",
         "rejected_relation",
     )
+
+
+def test_localize_table_records_renames_headers_and_common_values() -> None:
+    rows = streamlit_app.localize_table_records(
+        [
+            {
+                "entity_id": "ENT_1",
+                "canonical_name": "APEX GLOBAL HOLDINGS",
+                "country": "US",
+                "entity_type": "group",
+                "tags": None,
+                "status": "active",
+            },
+            {
+                "id": "CLM_1",
+                "relation_type": "trading_partner_candidate",
+                "status": "candidate",
+                "confidence_level": "medium",
+            },
+        ]
+    )
+
+    assert rows == [
+        {
+            "企业ID": "ENT_1",
+            "标准企业名称": "APEX GLOBAL HOLDINGS",
+            "国家/地区": "US",
+            "主体类型": "集团",
+            "标签": "-",
+            "状态": "有效",
+        },
+        {
+            "记录ID": "CLM_1",
+            "关系类型": "普通贸易伙伴（候选）",
+            "状态": "候选",
+            "置信等级": "中",
+        },
+    ]
+
+
+def test_search_tab_displays_chinese_table_headers(monkeypatch) -> None:
+    class FakeStreamlit:
+        def __init__(self) -> None:
+            self.frames: list[list[dict]] = []
+
+        def subheader(self, *_args, **_kwargs) -> None:
+            return None
+
+        def text_input(self, label, **_kwargs) -> str:
+            return "ape" if label == "企业名称或别名" else ""
+
+        def dataframe(self, rows, **_kwargs) -> None:
+            self.frames.append(rows)
+
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "search_entities",
+        lambda _query: [
+            {
+                "entity_id": "ENT_1",
+                "canonical_name": "APEX GLOBAL HOLDINGS",
+                "country": "US",
+                "entity_type": "subsidiary",
+                "tags": None,
+                "status": "active",
+            }
+        ],
+    )
+
+    streamlit_app.render_search_tab()
+
+    assert fake_st.frames == [
+        [
+            {
+                "企业ID": "ENT_1",
+                "标准企业名称": "APEX GLOBAL HOLDINGS",
+                "国家/地区": "US",
+                "主体类型": "子公司/分支机构",
+                "标签": "-",
+                "状态": "有效",
+            }
+        ]
+    ]
+
+
+def test_format_error_message_translates_known_backend_errors() -> None:
+    assert streamlit_app.format_error_message(
+        ValueError("Claim already finalized by history review: CLM_1")
+    ) == "该候选关系已被历史审核定稿：CLM_1"
 
 
 
@@ -389,6 +522,117 @@ def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) ->
         "history_conflict": 1,
         "unchanged": 0,
     }
+
+
+def test_review_queue_tab_displays_queue_and_sets_selected_claim(monkeypatch) -> None:
+    class FakeColumn:
+        def metric(self, *_args, **_kwargs) -> None:
+            return None
+
+    class FakeExpander:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    class FakeStreamlit:
+        def __init__(self) -> None:
+            self.session_state: dict[str, str] = {}
+            self.frames: list[list[dict]] = []
+            self.success_messages: list[str] = []
+
+        def subheader(self, *_args, **_kwargs) -> None:
+            return None
+
+        def caption(self, *_args, **_kwargs) -> None:
+            return None
+
+        def multiselect(self, label, options, default=None, **_kwargs):
+            if label == "关系状态":
+                return list(default or options)
+            return []
+
+        def text_input(self, *_args, **_kwargs) -> str:
+            return ""
+
+        def number_input(self, *_args, value=100, **_kwargs) -> int:
+            return value
+
+        def warning(self, *_args, **_kwargs) -> None:
+            return None
+
+        def columns(self, count: int):
+            return [FakeColumn() for _ in range(count)]
+
+        def info(self, *_args, **_kwargs) -> None:
+            return None
+
+        def dataframe(self, rows, **_kwargs) -> None:
+            self.frames.append(rows)
+
+        def selectbox(self, _label, options, **_kwargs) -> str:
+            return list(options)[0]
+
+        def markdown(self, *_args, **_kwargs) -> None:
+            return None
+
+        def expander(self, *_args, **_kwargs) -> FakeExpander:
+            return FakeExpander()
+
+        def button(self, label, **_kwargs) -> bool:
+            return label == "带到人工审核 tab"
+
+        def success(self, message: str) -> None:
+            self.success_messages.append(message)
+
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_review_queue",
+        lambda **_kwargs: {
+            "summary": {
+                "total_count": 1,
+                "status_counts": {
+                    "history_conflict": 1,
+                    "history_matched": 0,
+                    "candidate": 0,
+                    "pending_verify": 0,
+                },
+            },
+            "items": [
+                {
+                    "claim_id": "CLM_QUEUE",
+                    "from_name": "ACME TRADING",
+                    "to_name": "BETA FACTORY",
+                    "relation_status": "history_conflict",
+                    "confidence_level": "high",
+                    "order_count": 8,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_relationship_detail",
+        lambda _claim_id: {
+            "claim_id": "CLM_QUEUE",
+            "from_name": "ACME TRADING",
+            "to_name": "BETA FACTORY",
+            "candidate_relation_type": "trading_partner_candidate",
+            "relation_status": "history_conflict",
+        },
+    )
+    monkeypatch.setattr(streamlit_app, "get_relationship_evidence", lambda _claim_id: [])
+
+    streamlit_app.render_review_queue_tab()
+
+    assert fake_st.frames
+    assert fake_st.session_state[streamlit_app.SELECTED_CLAIM_STATE_KEY] == "CLM_QUEUE"
+    assert fake_st.session_state[streamlit_app.REVIEW_CLAIM_WIDGET_KEY] == "CLM_QUEUE"
+    assert fake_st.success_messages
+
 
 def test_review_tab_uses_relation_type_selectboxes(monkeypatch) -> None:
     class FakeStreamlit:
@@ -572,6 +816,87 @@ def test_review_submit_value_error_displays_error(monkeypatch) -> None:
     streamlit_app.render_review_tab()
 
     assert fake_st.errors == ["claim already finalized"]
+
+
+def test_review_submit_success_stores_flash_and_requests_rerun(monkeypatch) -> None:
+    class FakeExpander:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    class FakeStreamlit:
+        def __init__(self) -> None:
+            self.session_state = {streamlit_app.REVIEW_CLAIM_WIDGET_KEY: "CLM_1"}
+            self.rerun_count = 0
+
+        def subheader(self, *_args, **_kwargs) -> None:
+            return None
+
+        def text_input(self, label, value="", key=None, **_kwargs) -> str:
+            if key == streamlit_app.REVIEW_CLAIM_WIDGET_KEY:
+                return "CLM_1"
+            if label == "\u64cd\u4f5c\u4eba":
+                return "tester"
+            return value
+
+        def markdown(self, *_args, **_kwargs) -> None:
+            return None
+
+        def expander(self, *_args, **_kwargs) -> FakeExpander:
+            return FakeExpander()
+
+        def json(self, *_args, **_kwargs) -> None:
+            return None
+
+        def selectbox(self, _label, options, index=0, **_kwargs) -> str:
+            return tuple(options)[index]
+
+        def text_area(self, *_args, **_kwargs) -> str:
+            return "review reason"
+
+        def button(self, label, **_kwargs) -> bool:
+            return label == "\u63d0\u4ea4\u5ba1\u6838"
+
+        def error(self, *_args, **_kwargs) -> None:
+            return None
+
+        def divider(self) -> None:
+            return None
+
+        def rerun(self) -> None:
+            self.rerun_count += 1
+
+    fake_st = FakeStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_relationship_detail",
+        lambda _claim_id: {
+            "claim_id": "CLM_1",
+            "from_name": "ACME TRADING",
+            "to_name": "BETA FACTORY",
+            "candidate_relation_type": "trading_partner_candidate",
+            "relation_status": "candidate",
+            "history_context": None,
+        },
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "decide_relationship",
+        lambda *_args, **_kwargs: {"relationship_id": "REL_1"},
+    )
+
+    streamlit_app.render_review_tab()
+
+    assert fake_st.rerun_count == 1
+    assert fake_st.session_state[streamlit_app.REVIEW_CLEAR_CLAIM_STATE_KEY] is True
+    assert fake_st.session_state[streamlit_app.REVIEW_SUCCESS_FLASH_STATE_KEY] == {
+        "claim_id": "CLM_1",
+        "result": {"relationship_id": "REL_1"},
+    }
+
 
 def test_review_detail_summary_includes_entity_names() -> None:
     summary = streamlit_app.format_relationship_detail_summary(

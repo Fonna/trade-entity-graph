@@ -19,7 +19,7 @@ def _primary_source(inputs: ImportInputs) -> Path:
     for path in (inputs.orders_path, inputs.entities_path, inputs.relationships_path):
         if path is not None:
             return Path(path)
-    raise ValueError("At least one import input path is required")
+    raise ValueError("请至少提供一个导入文件路径")
 
 
 def _input_sources(inputs: ImportInputs) -> list[tuple[str, Path]]:

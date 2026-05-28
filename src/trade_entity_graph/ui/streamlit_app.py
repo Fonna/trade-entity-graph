@@ -23,6 +23,11 @@ from trade_entity_graph.services.relationship_service import (
     get_relationship_detail,
     get_relationship_evidence,
 )
+from trade_entity_graph.services.review_queue_service import (
+    REVIEW_QUEUE_CONFIDENCE_LEVELS,
+    REVIEW_QUEUE_STATUSES,
+    list_review_queue,
+)
 from trade_entity_graph.services.review_service import (
     create_manual_relationship,
     decide_relationship,
@@ -31,10 +36,12 @@ from trade_entity_graph.services.review_service import (
     supersede_history_with_claim,
 )
 
-TAB_LABELS = ["数据导入", "企业搜索", "关系图谱", "关系详情", "人工审核", "导出"]
+TAB_LABELS = ["数据导入", "企业搜索", "关系图谱", "关系详情", "待审核队列", "人工审核", "导出"]
 
 SELECTED_CLAIM_STATE_KEY = "selected_claim_id"
 REVIEW_CLAIM_WIDGET_KEY = "review_claim_id"
+REVIEW_SUCCESS_FLASH_STATE_KEY = "review_success_flash"
+REVIEW_CLEAR_CLAIM_STATE_KEY = "review_clear_claim_after_success"
 DEFAULT_RELATION_TYPE = "trading_partner"
 RELATION_TYPE_OPTIONS: tuple[str, ...] = (
     "trading_partner",
@@ -71,6 +78,140 @@ CANDIDATE_TO_FINAL_RELATION_TYPE: dict[str, str] = {
     "co_order_role_candidate": "co_order_role",
     "unknown_candidate": "unknown",
 }
+TABLE_COLUMN_LABELS: dict[str, str] = {
+    "entity_id": "企业ID",
+    "canonical_name": "标准企业名称",
+    "country": "国家/地区",
+    "entity_type": "主体类型",
+    "tags": "标签",
+    "status": "状态",
+    "id": "记录ID",
+    "source": "起点企业ID",
+    "target": "终点企业ID",
+    "source_label": "起点企业",
+    "target_label": "终点企业",
+    "edge_type": "边类型",
+    "record_type": "记录类型",
+    "relation_type": "关系类型",
+    "relation_status": "关系状态",
+    "candidate_relation_type": "候选关系类型",
+    "confidence_level": "置信等级",
+    "confidence_score": "置信分",
+    "order_count": "订单数",
+    "total_teu": "总TEU",
+    "teu": "TEU",
+    "label": "标签",
+    "recommendation_reason": "推荐理由",
+    "relationship_id": "关系ID",
+    "claim_id": "候选关系ID",
+    "from_entity_id": "起点企业ID",
+    "from_name": "起点企业",
+    "to_entity_id": "终点企业ID",
+    "to_name": "终点企业",
+    "source_type": "来源类型",
+    "decision_note": "判断备注",
+    "verified_by": "审核人",
+    "verified_at": "审核时间",
+    "evidence_id": "证据ID",
+    "order_id": "订单ID",
+    "source_file": "来源文件",
+    "source_sheet": "来源工作表",
+    "source_row": "来源行",
+    "run_id": "批次号",
+    "imported_at": "导入时间",
+    "last_activity_at": "最近处理时间",
+    "queue_priority": "队列优先级",
+    "review_action_hint": "建议处理方式",
+    "role_pair_summary": "角色组合",
+    "destination_summary": "目的国摘要",
+    "product_summary": "产品摘要",
+}
+DISPLAY_VALUE_LABELS: dict[str, dict[str, str]] = {
+    "entity_type": {
+        "group": "集团",
+        "subsidiary": "子公司/分支机构",
+        "customer": "客户",
+        "shipper": "发货人",
+        "consignee": "收货人",
+        "notify": "通知人",
+        "buyer": "买方",
+        "factory": "工厂",
+    },
+    "status": {
+        "active": "有效",
+        "inactive": "停用",
+        "candidate": "候选",
+        "pending_verify": "待验证",
+        "history_conflict": "历史冲突",
+        "history_matched": "匹配历史结论",
+        "verified": "已确认",
+        "rejected": "已否定",
+        "deprecated": "已失效",
+        "evidence": "证据",
+    },
+    "relation_status": {
+        "candidate": "候选",
+        "pending_verify": "待验证",
+        "history_conflict": "历史冲突",
+        "history_matched": "匹配历史结论",
+        "verified": "已确认",
+        "rejected": "已否定",
+        "deprecated": "已失效",
+    },
+    "confidence_level": {
+        "high": "高",
+        "medium": "中",
+        "low": "低",
+    },
+    "edge_type": {
+        "relationship_claim": "候选关系",
+        "curated_relationship": "最终关系",
+        "order_role_edge": "订单角色边",
+    },
+    "record_type": {
+        "relationship_claim": "候选关系",
+        "curated_relationship": "最终关系",
+        "order_role_edge": "订单角色边",
+    },
+}
+ERROR_MESSAGE_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("Unknown relationship claim: ", "未找到候选关系："),
+    ("Unknown curated relationship: ", "未找到最终关系："),
+    (
+        "Superseded relationship must be current-effective and match the claim pair",
+        "被替代的历史关系必须仍然有效，并且与当前候选关系的企业对一致",
+    ),
+    ("Claim must be in one of ", "候选关系当前状态不允许执行该操作："),
+    (
+        "Claim already has a reviewed relationship: ",
+        "该候选关系已存在审核后的最终关系：",
+    ),
+    (
+        "Claim already finalized by history review: ",
+        "该候选关系已被历史审核定稿：",
+    ),
+    (
+        "Claim already finalized by history review",
+        "该候选关系已被历史审核定稿",
+    ),
+    (
+        "Claim has effective historical relationship context; use history-aware review action",
+        "该候选关系存在有效历史关系，请使用历史关系相关的审核动作",
+    ),
+    (
+        "No historical relationship found for claim: ",
+        "未找到该候选关系对应的历史关系：",
+    ),
+    ("Unsupported action_type: ", "不支持的审核动作："),
+    (
+        "Claim must be in an allowed, unfinalized state to keep history",
+        "候选关系必须处于允许且未定稿状态，才能沿用历史结论",
+    ),
+    (
+        "Claim must be in an allowed, unfinalized state to mark pending verify",
+        "候选关系必须处于允许且未定稿状态，才能标记为待验证",
+    ),
+)
 
 
 class IntroSection(TypedDict):
@@ -141,6 +282,45 @@ def set_selected_claim_id(
     return claim_id
 
 
+def store_review_success_for_refresh(
+    claim_id: str,
+    result: dict[str, Any],
+    *,
+    state: MutableMapping[str, Any] | None = None,
+) -> None:
+    """Persist a success message and request claim cleanup on the next rerun."""
+
+    target_state = st.session_state if state is None else state
+    target_state[REVIEW_SUCCESS_FLASH_STATE_KEY] = {
+        "claim_id": claim_id,
+        "result": result,
+    }
+    target_state[REVIEW_CLEAR_CLAIM_STATE_KEY] = True
+
+
+def consume_review_refresh_state(
+    *, state: MutableMapping[str, Any] | None = None
+) -> dict[str, Any] | None:
+    """Clear reviewed claim selection before widgets are recreated."""
+
+    target_state = st.session_state if state is None else state
+    if target_state.pop(REVIEW_CLEAR_CLAIM_STATE_KEY, False):
+        target_state.pop(SELECTED_CLAIM_STATE_KEY, None)
+        target_state.pop(REVIEW_CLAIM_WIDGET_KEY, None)
+    flash = target_state.pop(REVIEW_SUCCESS_FLASH_STATE_KEY, None)
+    return flash if isinstance(flash, dict) else None
+
+
+def request_streamlit_rerun() -> bool:
+    """Request a Streamlit rerun when available."""
+
+    rerun = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
+    if not callable(rerun):
+        return False
+    rerun()
+    return True
+
+
 def _edge_style(edge: dict[str, Any]) -> dict[str, str]:
     edge_type = edge.get("edge_type")
     status = edge.get("status")
@@ -180,6 +360,54 @@ def format_relation_type_option(relation_type: str) -> str:
 
     description = RELATION_TYPE_LABELS.get(relation_type)
     return f"{relation_type}（{description}）" if description else relation_type
+
+
+def _format_display_value(column: str, value: Any) -> Any:
+    if value is None or value == "":
+        return "-"
+    if column in {"relation_type", "candidate_relation_type"}:
+        text = str(value)
+        if text.endswith("_candidate"):
+            final_type = final_relation_type_for_candidate(text)
+            label = RELATION_TYPE_LABELS.get(final_type, text)
+            return f"{label}（候选）"
+        return RELATION_TYPE_LABELS.get(text, value)
+    return DISPLAY_VALUE_LABELS.get(column, {}).get(str(value), value)
+
+
+def localize_table_records(records: Any) -> Any:
+    """Return table records with Chinese headers and common display values."""
+
+    if not isinstance(records, list):
+        return records
+    localized_rows = []
+    for row in records:
+        if not isinstance(row, dict):
+            localized_rows.append(row)
+            continue
+        localized_rows.append(
+            {
+                TABLE_COLUMN_LABELS.get(key, key): _format_display_value(key, value)
+                for key, value in row.items()
+            }
+        )
+    return localized_rows
+
+
+def format_error_message(error: Exception) -> str:
+    """Translate known backend errors before showing them to users."""
+
+    message = str(error)
+    for english, chinese in ERROR_MESSAGE_PREFIXES:
+        if message.startswith(english):
+            return f"{chinese}{message.removeprefix(english)}"
+    return message
+
+
+def show_table(records: Any) -> None:
+    """Render a Streamlit dataframe with localized business-facing labels."""
+
+    st.dataframe(localize_table_records(records))
 
 
 def _short_edge_label(edge: dict[str, Any]) -> str:
@@ -537,6 +765,16 @@ def format_candidate_edge_label(edge: dict[str, Any]) -> str:
     )
 
 
+def format_queue_item_label(item: dict[str, Any]) -> str:
+    """Return a compact label for one global review queue item."""
+
+    return (
+        f"{item.get('claim_id') or '-'} | {item.get('from_name') or '-'} -> "
+        f"{item.get('to_name') or '-'} | {item.get('relation_status') or '-'} | "
+        f"{item.get('confidence_level') or '-'} | {item.get('order_count') or 0} orders"
+    )
+
+
 def render_intro() -> None:
     """Render concise product guidance above the main workflow tabs."""
 
@@ -579,7 +817,7 @@ def render_import_tab() -> None:
         st.success(f"导入完成，批次号：{result.run_id}")
         if result.archived_files:
             st.info(f"原始文件已归档到 data/raw/imports/{result.run_id}/")
-            st.dataframe(result.archived_files)
+            show_table(result.archived_files)
         st.json(
             {**result.__dict__, **edge_result, **claim_result, "history_reuse": history_reuse}
         )
@@ -592,7 +830,7 @@ def render_search_tab() -> None:
     query = st.text_input("企业名称或别名")
     if query:
         matches = search_entities(query)
-        st.dataframe(matches)
+        show_table(matches)
         selected = st.text_input("查看详情的企业 ID")
         if selected:
             st.json(get_entity_detail(selected))
@@ -654,8 +892,8 @@ def render_graph_tab() -> None:
         st.info("当前中心企业暂无待审核候选关系。")
 
     with st.expander("节点与边数据"):
-        st.dataframe(nodes)
-        st.dataframe(edges)
+        show_table(nodes)
+        show_table(edges)
 
 
 def render_relationship_detail_tab() -> None:
@@ -665,13 +903,80 @@ def render_relationship_detail_tab() -> None:
     relationship_id = st.text_input("关系 ID 或候选关系 ID")
     if relationship_id:
         st.json(get_relationship_detail(relationship_id))
-        st.dataframe(get_relationship_evidence(relationship_id))
+        show_table(get_relationship_evidence(relationship_id))
+
+
+def render_review_queue_tab() -> None:
+    """Render the global pending review queue."""
+
+    st.subheader("全局待审核队列")
+    st.caption("跨企业查看所有未定稿候选关系，适合每次导入后按优先级集中审核。")
+    statuses = st.multiselect(
+        "关系状态",
+        REVIEW_QUEUE_STATUSES,
+        default=list(REVIEW_QUEUE_STATUSES),
+        format_func=lambda value: DISPLAY_VALUE_LABELS["relation_status"].get(value, value),
+    )
+    confidence_levels = st.multiselect(
+        "置信等级（可选）",
+        REVIEW_QUEUE_CONFIDENCE_LEVELS,
+        default=[],
+        format_func=lambda value: DISPLAY_VALUE_LABELS["confidence_level"].get(value, value),
+    )
+    run_id = st.text_input("批次号筛选（可选）")
+    keyword = st.text_input("企业名称 / 候选关系 ID / 推荐理由关键词（可选）")
+    limit = st.number_input("显示条数", min_value=1, max_value=500, value=100, step=10)
+    if not statuses:
+        st.warning("请至少选择一个关系状态。")
+        return
+
+    queue = list_review_queue(
+        statuses=tuple(statuses),
+        run_id=run_id or None,
+        keyword=keyword or None,
+        confidence_levels=tuple(confidence_levels) if confidence_levels else None,
+        limit=int(limit),
+    )
+    summary = queue["summary"]
+    status_counts = summary["status_counts"]
+    metric_cols = st.columns(5)
+    metric_cols[0].metric("待处理总数", summary["total_count"])
+    metric_cols[1].metric("历史冲突", status_counts.get("history_conflict", 0))
+    metric_cols[2].metric("匹配历史", status_counts.get("history_matched", 0))
+    metric_cols[3].metric("普通候选", status_counts.get("candidate", 0))
+    metric_cols[4].metric("待验证", status_counts.get("pending_verify", 0))
+
+    items = queue["items"]
+    if not items:
+        st.info("当前筛选条件下没有待审核关系。")
+        return
+
+    show_table(items)
+    claim_ids = [item["claim_id"] for item in items]
+    label_by_id = {item["claim_id"]: format_queue_item_label(item) for item in items}
+    selected_claim_id = st.selectbox(
+        "选择要处理的候选关系",
+        claim_ids,
+        format_func=lambda claim_id: label_by_id.get(claim_id, claim_id),
+    )
+    selected_detail = get_relationship_detail(selected_claim_id)
+    st.markdown(format_manual_review_context(selected_detail))
+    with st.expander("查看订单证据"):
+        show_table(get_relationship_evidence(selected_claim_id))
+    if st.button("带到人工审核 tab"):
+        set_selected_claim_id(selected_claim_id)
+        st.success(f"已选择候选关系 {selected_claim_id}，请切换到人工审核 tab 继续处理。")
 
 
 def render_review_tab() -> None:
     """Render manual review actions."""
 
     st.subheader("\u4eba\u5de5\u5ba1\u6838")
+    success_flash = consume_review_refresh_state()
+    if success_flash:
+        st.success(f"已完成审核：{success_flash.get('claim_id')}，待审核队列已刷新。")
+        st.json(success_flash.get("result", {}))
+
     selected_claim_id = get_selected_claim_id()
     if selected_claim_id and REVIEW_CLAIM_WIDGET_KEY not in st.session_state:
         st.session_state[REVIEW_CLAIM_WIDGET_KEY] = selected_claim_id
@@ -761,9 +1066,12 @@ def render_review_tab() -> None:
                     operator=operator,
                 )
         except ValueError as exc:
-            st.error(str(exc))
+            st.error(format_error_message(exc))
         else:
-            st.json(result)
+            store_review_success_for_refresh(claim_id, result)
+            if not request_streamlit_rerun():
+                st.success(f"已完成审核：{claim_id}，待审核队列将在下次刷新后更新。")
+                st.json(result)
 
     st.divider()
     st.subheader("\u4eba\u5de5\u65b0\u589e\u5173\u7cfb")
@@ -796,7 +1104,7 @@ def render_review_tab() -> None:
                 operator=operator,
             )
         except ValueError as exc:
-            st.error(str(exc))
+            st.error(format_error_message(exc))
         else:
             st.json(result)
 
@@ -809,7 +1117,7 @@ def render_export_tab() -> None:
     include_rejected = st.checkbox("导出时包含已否定关系")
     if center_entity_id:
         rows = export_relationship_rows(center_entity_id, include_rejected=include_rejected)
-        st.dataframe(rows)
+        show_table(rows)
         st.download_button(
             "下载 JSON",
             data=str(rows),
@@ -832,8 +1140,10 @@ def main() -> None:
     with tabs[3]:
         render_relationship_detail_tab()
     with tabs[4]:
-        render_review_tab()
+        render_review_queue_tab()
     with tabs[5]:
+        render_review_tab()
+    with tabs[6]:
         render_export_tab()
 
 

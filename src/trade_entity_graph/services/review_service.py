@@ -137,7 +137,7 @@ def _fetch_claim_or_raise(connection, claim_id: str) -> dict[str, Any]:
         (claim_id,),
     ).fetchone()
     if not claim:
-        raise ValueError(f"Unknown relationship claim: {claim_id}")
+        raise ValueError(f"未找到候选关系：{claim_id}")
     return dict(claim)
 
 
@@ -147,7 +147,7 @@ def _fetch_relationship_or_raise(connection, relationship_id: str) -> dict[str, 
         (relationship_id,),
     ).fetchone()
     if not relationship:
-        raise ValueError(f"Unknown curated relationship: {relationship_id}")
+        raise ValueError(f"未找到最终关系：{relationship_id}")
     return dict(relationship)
 
 
@@ -187,7 +187,7 @@ def _fetch_current_effective_history_for_claim(
     ).fetchone()
     if not relationship:
         raise ValueError(
-            "Superseded relationship must be current-effective and match the claim pair"
+            "被替代的历史关系必须仍然有效，并且与当前候选关系的企业对一致"
         )
     return dict(relationship)
 
@@ -196,7 +196,7 @@ def _validate_supersede_claim_state(claim: dict[str, Any]) -> None:
     if claim["relation_status"] not in SUPERSEDE_CLAIM_STATUSES:
         allowed = ", ".join(SUPERSEDE_CLAIM_STATUSES)
         raise ValueError(
-            f"Claim must be in one of ({allowed}) to supersede history"
+            f"候选关系必须处于以下状态之一才能替代历史结论：{allowed}"
         )
 
 
@@ -208,7 +208,7 @@ def _validate_claim_state(
 ) -> None:
     if claim["relation_status"] not in allowed_statuses:
         allowed = ", ".join(allowed_statuses)
-        raise ValueError(f"Claim must be in one of ({allowed}) to {action}")
+        raise ValueError(f"候选关系必须处于以下状态之一才能{action}：{allowed}")
 
 
 def _ensure_claim_has_no_curated_relationship(connection, claim_id: str) -> None:
@@ -222,7 +222,7 @@ def _ensure_claim_has_no_curated_relationship(connection, claim_id: str) -> None
         (claim_id,),
     ).fetchone()
     if existing:
-        raise ValueError(f"Claim already has a reviewed relationship: {claim_id}")
+        raise ValueError(f"该候选关系已存在审核后的最终关系：{claim_id}")
 
 
 def _ensure_claim_has_no_history_final_decision(connection, claim_id: str) -> None:
@@ -237,19 +237,18 @@ def _ensure_claim_has_no_history_final_decision(connection, claim_id: str) -> No
         (claim_id,),
     ).fetchone()
     if existing:
-        raise ValueError(f"Claim already finalized by history review: {claim_id}")
+        raise ValueError(f"该候选关系已被历史审核定稿：{claim_id}")
 
 
 def _ensure_claim_has_no_effective_history_context(connection, claim: dict[str, Any]) -> None:
     if classify_claim_against_history(connection, claim) is not None:
         raise ValueError(
-            "Claim has effective historical relationship context; "
-            "use history-aware review action"
+            "该候选关系存在有效历史关系，请使用历史关系相关的审核动作"
         )
 
 
 def _raise_duplicate_review_error(claim_id: str) -> None:
-    raise ValueError(f"Claim already has a reviewed relationship: {claim_id}")
+    raise ValueError(f"该候选关系已存在审核后的最终关系：{claim_id}")
 
 
 def _resolve_history_relationship_id(
@@ -263,7 +262,7 @@ def _resolve_history_relationship_id(
 
     context = get_history_context_for_claim(claim_id, db_path=db_path)
     if context is None:
-        raise ValueError(f"No historical relationship found for claim: {claim_id}")
+        raise ValueError(f"未找到该候选关系对应的历史关系：{claim_id}")
     return context["history_relationship"]["relationship_id"]
 
 
@@ -280,7 +279,7 @@ def decide_relationship(
 
     status_by_action = {"confirm": "verified", "modify": "verified", "reject": "rejected"}
     if action_type not in status_by_action:
-        raise ValueError(f"Unsupported action_type: {action_type}")
+        raise ValueError(f"不支持的审核动作：{action_type}")
 
     with get_connection(db_path) as connection:
         _begin_immediate(connection)
@@ -288,7 +287,7 @@ def decide_relationship(
         _validate_claim_state(
             claim,
             allowed_statuses=ORDINARY_DECISION_CLAIM_STATUSES,
-            action="decide relationship",
+            action="审核关系",
         )
         _ensure_claim_has_no_curated_relationship(connection, claim_id)
         _ensure_claim_has_no_history_final_decision(connection, claim_id)
@@ -359,7 +358,7 @@ def keep_history_for_claim(
         _validate_claim_state(
             claim,
             allowed_statuses=KEEP_HISTORY_CLAIM_STATUSES,
-            action="keep history",
+            action="沿用历史结论",
         )
         _ensure_claim_has_no_curated_relationship(connection, claim_id)
         _ensure_claim_has_no_history_final_decision(connection, claim_id)
@@ -392,7 +391,7 @@ def keep_history_for_claim(
             (after_status, claim_id, *KEEP_HISTORY_CLAIM_STATUSES),
         )
         if cursor.rowcount != 1:
-            raise ValueError("Claim must be in an allowed, unfinalized state to keep history")
+            raise ValueError("候选关系必须处于允许且未定稿状态，才能沿用历史结论")
         _write_claim_decision_and_audit(
             connection,
             claim=claim,
@@ -471,7 +470,7 @@ def supersede_history_with_claim(
         )
         if cursor.rowcount != 1:
             raise ValueError(
-                "Superseded relationship must be current-effective and match the claim pair"
+                "被替代的历史关系必须仍然有效，并且与当前候选关系的企业对一致"
             )
         claim_cursor = connection.execute(
             """
@@ -494,7 +493,7 @@ def supersede_history_with_claim(
             (claim_id, claim["relation_status"]),
         )
         if claim_cursor.rowcount != 1:
-            raise ValueError("Claim already finalized by history review")
+            raise ValueError("该候选关系已被历史审核定稿")
         connection.execute(
             """
             INSERT INTO audit_log (
@@ -594,7 +593,7 @@ def mark_claim_pending_verify(
         _validate_claim_state(
             claim,
             allowed_statuses=MARK_PENDING_CLAIM_STATUSES,
-            action="mark pending verify",
+            action="标记为待验证",
         )
         _ensure_claim_has_no_curated_relationship(connection, claim_id)
         _ensure_claim_has_no_history_final_decision(connection, claim_id)
@@ -622,7 +621,7 @@ def mark_claim_pending_verify(
         )
         if cursor.rowcount != 1:
             raise ValueError(
-                "Claim must be in an allowed, unfinalized state to mark pending verify"
+                "候选关系必须处于允许且未定稿状态，才能标记为待验证"
             )
         _write_claim_decision_and_audit(
             connection,

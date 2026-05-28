@@ -20,7 +20,7 @@ def search_entities_endpoint(q: str) -> list[dict[str, object]]:
 def get_entity_endpoint(entity_id: str) -> dict[str, object]:
     detail = get_entity_detail(entity_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail="Entity not found")
+        raise HTTPException(status_code=404, detail="未找到企业")
     return detail
 
 

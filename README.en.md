@@ -156,14 +156,14 @@ flowchart TD
 
 ## Current Development Status
 
-As of 2026-05-25, the current branch includes the M2-M8 P0 loop, source-file archiving, and demo acceptance data. Latest verification:
+As of 2026-05-28, the current branch includes the M2-M8 P0 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, and demo acceptance data. Latest verification:
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-Result: `18 passed`, ruff `All checks passed!`. A `.pytest_cache` write-permission warning may appear in the current desktop sandbox and does not affect the test result.
+Result: `101 passed`, ruff `All checks passed!`.
 
 ## Recommended Development Order
 
@@ -173,8 +173,8 @@ Result: `18 passed`, ruff `All checks passed!`. A `.pytest_cache` write-permissi
 4. M3: Order-role edge generation and aggregate statistics.
 5. M4: Relationship candidate generation, scoring, and recommendation reasons.
 6. M5: NetworkX local graph query service.
-7. M6: FastAPI endpoints for search, graph, details, reviews, and exports.
-8. M7: Streamlit MVP pages.
+7. M6: FastAPI endpoints for search, graph, details, reviews, the global review queue, and exports.
+8. M7: Streamlit MVP pages and the review queue workbench.
 9. M8: Review persistence, audit logs, acceptance demo.
 
 ## Remote Repository
