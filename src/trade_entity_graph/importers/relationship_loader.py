@@ -15,6 +15,7 @@ from trade_entity_graph.utils.ids import new_id
 @dataclass
 class RelationshipClaimLoadResult:
     claim_count: int = 0
+    success_rows: int = 0
     skipped_rows: list[str] = field(default_factory=list)
     import_errors: list[ImportErrorRecord] = field(default_factory=list)
 
@@ -174,6 +175,7 @@ def load_relationship_claims(
             ),
         )
         result.claim_count += 1
+        result.success_rows += 1
 
     connection.commit()
     return result

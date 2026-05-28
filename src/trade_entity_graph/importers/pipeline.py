@@ -48,6 +48,32 @@ def _quality_summary(import_errors: list[ImportErrorRecord]) -> dict[str, object
     }
 
 
+def _blocking_error_row_count(import_errors: list[ImportErrorRecord]) -> int:
+    row_error_keys: set[tuple[str | None, str | None, str | None, int]] = set()
+    non_row_error_count = 0
+    for record in import_errors:
+        if record.severity != "blocking":
+            continue
+        if record.row_number is None:
+            non_row_error_count += 1
+            continue
+        row_error_keys.add(
+            (record.file_role, record.source_path, record.sheet_name, record.row_number)
+        )
+    return len(row_error_keys) + non_row_error_count
+
+
+def _error_summary(
+    skipped_rows: list[str],
+    import_errors: list[ImportErrorRecord],
+) -> str | None:
+    if skipped_rows:
+        return "; ".join(skipped_rows)
+    if import_errors:
+        return "; ".join(record.message for record in import_errors)
+    return None
+
+
 def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> ImportRunResult:
     """Run the M2 import pipeline for the provided input files."""
 
@@ -71,6 +97,7 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             sources=_input_sources(inputs),
         )
         import_errors: list[ImportErrorRecord] = []
+        success_rows = 0
 
         if inputs.entities_path is not None:
             entity_rows, mapping_errors = resolve_rows_for_role(
@@ -89,6 +116,7 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             result.alias_count = entity_result.alias_count
             result.skipped_rows.extend(entity_result.skipped_rows)
             import_errors.extend(entity_result.import_errors)
+            success_rows += entity_result.success_rows
 
         if inputs.orders_path is not None:
             order_rows, mapping_errors = resolve_rows_for_role(
@@ -105,6 +133,7 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             result.evidence_count = evidence_result.evidence_count
             result.skipped_rows.extend(evidence_result.skipped_rows)
             import_errors.extend(evidence_result.import_errors)
+            success_rows += evidence_result.success_rows
 
         if inputs.relationships_path is not None:
             relationship_rows, mapping_errors = resolve_rows_for_role(
@@ -121,6 +150,7 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             result.claim_count = claim_result.claim_count
             result.skipped_rows.extend(claim_result.skipped_rows)
             import_errors.extend(claim_result.import_errors)
+            success_rows += claim_result.success_rows
 
         write_import_errors(connection, import_errors)
         result.import_errors = [record.as_dict() for record in import_errors]
@@ -131,9 +161,9 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
         finish_import_batch(
             connection,
             run_id,
-            success_rows=result.entity_count + result.evidence_count + result.claim_count,
-            error_rows=result.error_count,
+            success_rows=success_rows,
+            error_rows=_blocking_error_row_count(import_errors),
             warning_rows=result.warning_count,
-            error_summary="; ".join(result.skipped_rows) if result.skipped_rows else None,
+            error_summary=_error_summary(result.skipped_rows, import_errors),
         )
         return result

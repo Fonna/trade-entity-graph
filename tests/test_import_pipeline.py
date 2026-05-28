@@ -186,3 +186,96 @@ def test_run_import_records_errors_and_keeps_valid_rows(tmp_path, monkeypatch) -
         "missing_required_value",
         "unknown_entity_reference",
     ]
+
+def test_import_batch_error_rows_deduplicates_blocking_relationship_source_rows(
+    tmp_path, monkeypatch
+) -> None:
+    relationships_path = tmp_path / "relationships.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "from_entity_name": ["UNKNOWN SUPPLIER"],
+            "to_entity_name": ["UNKNOWN BUYER"],
+            "candidate_relation_type": ["trading_partner_candidate"],
+        }
+    ).to_csv(relationships_path, index=False)
+
+    result = run_import(
+        ImportInputs(relationships_path=relationships_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        batch = connection.execute(
+            "SELECT success_rows, error_rows FROM import_batch WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()
+
+    assert result.error_count == 2
+    assert batch["success_rows"] == 0
+    assert batch["error_rows"] == 1
+
+
+def test_import_batch_success_rows_counts_duplicate_valid_entity_source_rows(
+    tmp_path, monkeypatch
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING", "ACME TRADING"],
+            "original_name": ["Acme Trading Ltd", "Acme Trading Limited"],
+        }
+    ).to_csv(entities_path, index=False)
+
+    result = run_import(
+        ImportInputs(entities_path=entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        batch = connection.execute(
+            "SELECT success_rows, error_rows FROM import_batch WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()
+
+    assert result.entity_count == 1
+    assert batch["success_rows"] == 2
+    assert batch["error_rows"] == 0
+
+
+def test_mapping_only_failures_populate_import_batch_error_summary(tmp_path, monkeypatch) -> None:
+    orders_path = tmp_path / "orders.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "customer_name": ["ACME TRADING"],
+            "teu": ["1.0"],
+        }
+    ).to_csv(orders_path, index=False)
+
+    result = run_import(
+        ImportInputs(orders_path=orders_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        import_error_count = connection.execute(
+            "SELECT COUNT(*) FROM import_error WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()[0]
+        batch = connection.execute(
+            "SELECT error_rows, error_summary FROM import_batch WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()
+
+    assert import_error_count == 1
+    assert batch["error_rows"] == 1
+    assert batch["error_summary"] is not None
+    assert "Missing required field: order_id." in batch["error_summary"]

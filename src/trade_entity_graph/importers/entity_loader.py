@@ -15,6 +15,7 @@ from trade_entity_graph.utils.normalization import normalize_company_name
 class EntityLoadResult:
     entity_count: int = 0
     alias_count: int = 0
+    success_rows: int = 0
     skipped_rows: list[str] = field(default_factory=list)
     import_errors: list[ImportErrorRecord] = field(default_factory=list)
 
@@ -109,6 +110,7 @@ def load_entities(
             )
             continue
 
+        result.success_rows += 1
         entity_id = find_entity_id_by_name(connection, canonical_name)
         if entity_id is None:
             entity_id = new_id("ENT")
