@@ -169,7 +169,7 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-验证结果：`130 passed`，ruff `All checks passed!`。
+验证结果：`164 passed`，ruff `All checks passed!`。
 
 ## 推荐开发顺序
 
