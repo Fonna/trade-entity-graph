@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from trade_entity_graph.importers.models import ImportInputs
 from trade_entity_graph.importers.pipeline import run_import
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
 from trade_entity_graph.services.import_quality_service import (
+    export_import_errors,
     get_import_batch_detail,
     get_import_quality_report,
+    import_errors_export_filename,
     list_import_batches,
     list_import_errors,
 )
@@ -83,6 +85,22 @@ def list_import_errors_endpoint(
         )
     except ValueError as exc:
         raise _not_found_from_value_error(exc) from exc
+
+
+@router.get("/{run_id}/errors/export")
+def export_import_errors_endpoint(run_id: str) -> Response:
+    try:
+        export_result = export_import_errors(run_id)
+    except ValueError as exc:
+        raise _not_found_from_value_error(exc) from exc
+
+    content = Path(str(export_result["path"])).read_bytes()
+    filename = import_errors_export_filename(run_id)
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{run_id}/quality-report")

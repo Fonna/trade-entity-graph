@@ -53,6 +53,53 @@ def _request(app, method: str, path: str, *, query=None, json_body=None):
     return asyncio.run(_call())
 
 
+def _raw_request(app, method: str, path: str, *, query=None, json_body=None):
+    async def _call():
+        body = json.dumps(json_body).encode("utf-8") if json_body is not None else b""
+        messages = []
+        received = False
+
+        async def receive():
+            nonlocal received
+            if not received:
+                received = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            messages.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("utf-8"),
+            "query_string": urlencode(query or {}).encode("utf-8"),
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+        }
+        await app(scope, receive, send)
+        start = next(
+            message for message in messages if message["type"] == "http.response.start"
+        )
+        content = b"".join(
+            message.get("body", b"")
+            for message in messages
+            if message["type"] == "http.response.body"
+        )
+        headers = {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in start.get("headers", [])
+        }
+        return start["status"], headers, content
+
+    return asyncio.run(_call())
+
+
 def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "api.db"
     entities_path = tmp_path / "entities.csv"
@@ -1204,6 +1251,61 @@ def test_imports_api_unknown_batch_errors_returns_404(tmp_path, monkeypatch) -> 
     from trade_entity_graph.api.main import create_app
 
     status, payload = _request(create_app(), "GET", "/imports/NO_SUCH/errors")
+
+    assert status == 404
+    assert "Unknown import batch" in payload["detail"]
+
+
+def test_imports_api_exports_batch_errors_csv(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-import-errors-export.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_EXPORT', 'orders.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO import_error (
+                error_id, run_id, file_role, source_path, sheet_name, row_number,
+                normalized_field, raw_value, error_type, severity, message
+            )
+            VALUES (
+                'IER_API_EXPORT', 'RUN_API_EXPORT', 'orders', 'orders.csv',
+                'orders', 3, 'teu', 'abc', 'invalid_numeric_value', 'blocking',
+                'TEU invalid'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    status, headers, content = _raw_request(
+        create_app(), "GET", "/imports/RUN_API_EXPORT/errors/export"
+    )
+
+    assert status == 200
+    assert headers["content-type"].startswith("text/csv")
+    assert "attachment;" in headers["content-disposition"]
+    assert 'filename="RUN_API_EXPORT_import_errors.csv"' in headers["content-disposition"]
+    assert content.startswith(b"\xef\xbb\xbferror_id,run_id")
+    assert "invalid_numeric_value" in content.decode("utf-8-sig")
+
+
+def test_imports_api_unknown_batch_errors_export_returns_404(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-import-errors-export-missing.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(create_app(), "GET", "/imports/NO_SUCH/errors/export")
 
     assert status == 404
     assert "Unknown import batch" in payload["detail"]

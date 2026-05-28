@@ -200,6 +200,47 @@ def test_import_quality_report_and_export_include_all_errors(tmp_path: Path) -> 
     assert export["row_count"] == 1005
 
 
+def test_export_import_errors_default_path_sanitizes_run_id(
+    tmp_path: Path, monkeypatch
+) -> None:
+    db_path = tmp_path / "quality.db"
+    unsafe_run_id = "../evil/run"
+    monkeypatch.chdir(tmp_path)
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES (?, 'orders.csv', 'tester')
+            """,
+            (unsafe_run_id,),
+        )
+        connection.execute(
+            """
+            INSERT INTO import_error (
+                error_id, run_id, file_role, source_path, sheet_name, row_number,
+                normalized_field, raw_value, error_type, severity, message
+            )
+            VALUES (
+                'IER_UNSAFE', ?, 'orders', 'orders.csv',
+                'orders', 3, 'teu', 'abc', 'invalid_numeric_value', 'blocking',
+                'TEU must be numeric'
+            )
+            """,
+            (unsafe_run_id,),
+        )
+        connection.commit()
+
+    export = export_import_errors(unsafe_run_id, db_path=db_path)
+
+    export_path = Path(export["path"]).resolve()
+    exports_dir = (tmp_path / "data" / "exports").resolve()
+    assert export_path.parent == exports_dir
+    assert ".." not in export_path.name
+    assert "/" not in export_path.name
+    assert "\\" not in export_path.name
+
+
 def test_list_import_errors_rejects_unknown_batch(tmp_path: Path) -> None:
     db_path = tmp_path / "quality.db"
     initialize_database(db_path)

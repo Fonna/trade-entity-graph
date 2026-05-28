@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,15 @@ ERROR_EXPORT_COLUMNS: tuple[str, ...] = (
     "message",
     "created_at",
 )
+
+
+def import_errors_export_filename(run_id: str) -> str:
+    """Return a filesystem-safe CSV filename for an import error export."""
+
+    safe_run_id = re.sub(r"[^A-Za-z0-9_-]+", "_", run_id).strip("_")
+    if not safe_run_id:
+        safe_run_id = "import"
+    return f"{safe_run_id}_import_errors.csv"
 
 
 def _safe_limit(value: int, maximum: int) -> int:
@@ -345,7 +355,7 @@ def export_import_errors(
     target = (
         Path(output_path)
         if output_path
-        else Path("data") / "exports" / f"{run_id}_import_errors.csv"
+        else Path("data") / "exports" / import_errors_export_filename(run_id)
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     with get_connection(db_path) as connection:
