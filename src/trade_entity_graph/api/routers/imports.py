@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from trade_entity_graph.importers.models import ImportInputs
@@ -33,10 +33,14 @@ class ImportRunRequest(BaseModel):
     aggregate_claims: bool = True
 
 
+def _not_found_from_value_error(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=404, detail=str(exc))
+
+
 @router.get("")
 def list_import_batches_endpoint(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     status: str | None = None,
 ) -> dict[str, object]:
     return list_import_batches(limit=limit, offset=offset, status=status)
@@ -44,7 +48,10 @@ def list_import_batches_endpoint(
 
 @router.get("/{run_id}")
 def get_import_batch_endpoint(run_id: str) -> dict[str, object]:
-    return get_import_batch_detail(run_id)
+    try:
+        return get_import_batch_detail(run_id)
+    except ValueError as exc:
+        raise _not_found_from_value_error(exc) from exc
 
 
 @router.get("/{run_id}/errors")
@@ -52,8 +59,8 @@ def list_import_errors_endpoint(
     run_id: str,
     severity: str | None = None,
     error_type: str | None = None,
-    limit: int = 200,
-    offset: int = 0,
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ) -> dict[str, object]:
     return list_import_errors(
         run_id,
@@ -66,7 +73,10 @@ def list_import_errors_endpoint(
 
 @router.get("/{run_id}/quality-report")
 def get_import_quality_report_endpoint(run_id: str) -> dict[str, object]:
-    return get_import_quality_report(run_id)
+    try:
+        return get_import_quality_report(run_id)
+    except ValueError as exc:
+        raise _not_found_from_value_error(exc) from exc
 
 
 @router.post("/run")

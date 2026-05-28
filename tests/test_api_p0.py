@@ -1196,6 +1196,131 @@ def test_imports_api_returns_batch_errors(tmp_path, monkeypatch) -> None:
     assert payload["items"][0]["error_type"] == "invalid_numeric_value"
 
 
+def test_imports_api_returns_batch_detail_with_quality_summary(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-import-detail.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (
+                run_id, source_file, imported_by, success_rows, error_rows, warning_rows
+            )
+            VALUES ('RUN_API_DETAIL', 'orders.csv', 'tester', 2, 1, 0)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO import_error (
+                error_id, run_id, file_role, source_path, sheet_name, row_number,
+                normalized_field, raw_value, error_type, severity, message
+            )
+            VALUES (
+                'IER_API_DETAIL', 'RUN_API_DETAIL', 'orders', 'orders.csv',
+                'orders', 4, 'teu', 'abc', 'invalid_numeric_value', 'blocking',
+                'TEU invalid'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(create_app(), "GET", "/imports/RUN_API_DETAIL")
+
+    assert status == 200
+    assert payload["batch"]["run_id"] == "RUN_API_DETAIL"
+    assert payload["quality_summary"]["blocking_error_count"] == 1
+    assert payload["quality_summary"]["error_count_by_type"] == {
+        "invalid_numeric_value": 1
+    }
+
+
+def test_imports_api_quality_report_returns_errors(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-import-report.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_REPORT', 'orders.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO import_error (
+                error_id, run_id, file_role, source_path, sheet_name, row_number,
+                normalized_field, raw_value, error_type, severity, message
+            )
+            VALUES (
+                'IER_API_REPORT', 'RUN_API_REPORT', 'orders', 'orders.csv',
+                'orders', 4, 'teu', 'abc', 'invalid_numeric_value', 'blocking',
+                'TEU invalid'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(), "GET", "/imports/RUN_API_REPORT/quality-report"
+    )
+
+    assert status == 200
+    assert payload["batch"]["run_id"] == "RUN_API_REPORT"
+    assert payload["errors"][0]["error_id"] == "IER_API_REPORT"
+    assert payload["error_summary"]["total_count"] == 1
+
+
+def test_imports_api_unknown_batch_returns_404(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-import-missing.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(create_app(), "GET", "/imports/NO_SUCH")
+
+    assert status == 404
+    assert "Unknown import batch" in payload["detail"]
+
+
+def test_imports_api_reserved_run_path_returns_stable_unknown_batch(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "api-import-run-path.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(create_app(), "GET", "/imports/run")
+
+    assert status == 404
+    assert "Unknown import batch: run" in payload["detail"]
+
+
+def test_imports_api_rejects_invalid_pagination(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-import-pagination.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+    status, _payload = _request(app, "GET", "/imports", query={"limit": 0})
+    assert status == 422
+
+    status, _payload = _request(
+        app, "GET", "/imports/RUN_API_PAGINATION/errors", query={"offset": -1}
+    )
+    assert status == 422
+
+
 def test_import_run_endpoint_includes_quality_summary(monkeypatch) -> None:
     class ImportResult:
         run_id = "RUN_IMPORT_QUALITY"
