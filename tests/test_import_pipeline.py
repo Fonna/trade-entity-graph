@@ -3,8 +3,8 @@ from pathlib import Path
 import pandas as pd
 
 from trade_entity_graph.db.connection import get_connection
-from trade_entity_graph.importers.models import ImportInputs
-from trade_entity_graph.importers.pipeline import run_import
+from trade_entity_graph.importers.models import ImportErrorRecord, ImportInputs
+from trade_entity_graph.importers.pipeline import _error_row_count, run_import
 
 
 def test_run_import_loads_entities_orders_and_role_names(tmp_path, monkeypatch) -> None:
@@ -162,13 +162,20 @@ def test_run_import_records_errors_and_keeps_valid_rows(tmp_path, monkeypatch) -
         claim_count = connection.execute("SELECT COUNT(*) FROM relationship_claim").fetchone()[0]
         errors = connection.execute(
             """
-            SELECT error_type, severity
+            SELECT error_type, severity, source_file_id
             FROM import_error
             WHERE run_id = ?
             ORDER BY file_role, row_number, normalized_field
             """,
             (result.run_id,),
         ).fetchall()
+        source_file_ids = {
+            row["source_file_id"]
+            for row in connection.execute(
+                "SELECT source_file_id FROM import_source_file WHERE run_id = ?",
+                (result.run_id,),
+            ).fetchall()
+        }
         batch = connection.execute(
             "SELECT success_rows, error_rows, warning_rows FROM import_batch WHERE run_id = ?",
             (result.run_id,),
@@ -180,12 +187,43 @@ def test_run_import_records_errors_and_keeps_valid_rows(tmp_path, monkeypatch) -
     assert result.warning_count == 0
     assert batch["success_rows"] == 4
     assert batch["error_rows"] == 4
+    assert all(row["source_file_id"] is not None for row in errors)
+    assert {item["source_file_id"] for item in result.archived_files} == source_file_ids
+    assert {row["source_file_id"] for row in errors}.issubset(source_file_ids)
     assert [row["error_type"] for row in errors] == [
         "missing_required_value",
         "invalid_numeric_value",
         "missing_required_value",
         "unknown_entity_reference",
     ]
+
+
+def test_error_row_count_deduplicates_warning_source_rows() -> None:
+    records = [
+        ImportErrorRecord(
+            run_id="RUN_WARN",
+            error_type="field_mapping_error",
+            severity="warning",
+            message="duplicate mapping 1",
+            file_role="orders",
+            source_path="orders.csv",
+            sheet_name="orders",
+            row_number=2,
+        ),
+        ImportErrorRecord(
+            run_id="RUN_WARN",
+            error_type="field_mapping_error",
+            severity="warning",
+            message="duplicate mapping 2",
+            file_role="orders",
+            source_path="orders.csv",
+            sheet_name="orders",
+            row_number=2,
+        ),
+    ]
+
+    assert len(records) == 2
+    assert _error_row_count(records, "warning") == 1
 
 def test_import_batch_error_rows_deduplicates_blocking_relationship_source_rows(
     tmp_path, monkeypatch

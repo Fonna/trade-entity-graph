@@ -1196,6 +1196,19 @@ def test_imports_api_returns_batch_errors(tmp_path, monkeypatch) -> None:
     assert payload["items"][0]["error_type"] == "invalid_numeric_value"
 
 
+def test_imports_api_unknown_batch_errors_returns_404(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-import-errors-missing.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(create_app(), "GET", "/imports/NO_SUCH/errors")
+
+    assert status == 404
+    assert "Unknown import batch" in payload["detail"]
+
+
 def test_imports_api_returns_batch_detail_with_quality_summary(
     tmp_path, monkeypatch
 ) -> None:

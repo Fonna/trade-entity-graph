@@ -59,6 +59,15 @@ def _list_all_import_errors(connection: Any, run_id: str) -> list[dict[str, Any]
     return _rows_to_dicts(rows)
 
 
+def _ensure_import_batch_exists(connection: Any, run_id: str) -> None:
+    row = connection.execute(
+        "SELECT 1 FROM import_batch WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"Unknown import batch: {run_id}")
+
+
 def _quality_summary(connection: Any, run_id: str) -> dict[str, Any]:
     severity_rows = connection.execute(
         """
@@ -267,6 +276,7 @@ def list_import_errors(
     where_clause = " AND ".join(clauses)
 
     with get_connection(db_path) as connection:
+        _ensure_import_batch_exists(connection, run_id)
         rows = connection.execute(
             f"""
             SELECT *

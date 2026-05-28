@@ -198,3 +198,15 @@ def test_import_quality_report_and_export_include_all_errors(tmp_path: Path) -> 
 
     assert len(report["errors"]) == 1005
     assert export["row_count"] == 1005
+
+
+def test_list_import_errors_rejects_unknown_batch(tmp_path: Path) -> None:
+    db_path = tmp_path / "quality.db"
+    initialize_database(db_path)
+
+    try:
+        list_import_errors("NO_SUCH", db_path=db_path)
+    except ValueError as exc:
+        assert "Unknown import batch: NO_SUCH" in str(exc)
+    else:
+        raise AssertionError("list_import_errors should reject unknown import batches")

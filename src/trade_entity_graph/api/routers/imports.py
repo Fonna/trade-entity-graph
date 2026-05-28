@@ -62,13 +62,16 @@ def list_import_errors_endpoint(
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, object]:
-    return list_import_errors(
-        run_id,
-        severity=severity,
-        error_type=error_type,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        return list_import_errors(
+            run_id,
+            severity=severity,
+            error_type=error_type,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise _not_found_from_value_error(exc) from exc
 
 
 @router.get("/{run_id}/quality-report")

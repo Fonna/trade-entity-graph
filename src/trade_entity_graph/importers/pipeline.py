@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from trade_entity_graph.config import get_settings
@@ -48,11 +49,11 @@ def _quality_summary(import_errors: list[ImportErrorRecord]) -> dict[str, object
     }
 
 
-def _blocking_error_row_count(import_errors: list[ImportErrorRecord]) -> int:
+def _error_row_count(import_errors: list[ImportErrorRecord], severity: str) -> int:
     row_error_keys: set[tuple[str | None, str | None, str | None, int]] = set()
     non_row_error_count = 0
     for record in import_errors:
-        if record.severity != "blocking":
+        if record.severity != severity:
             continue
         if record.row_number is None:
             non_row_error_count += 1
@@ -61,6 +62,18 @@ def _blocking_error_row_count(import_errors: list[ImportErrorRecord]) -> int:
             (record.file_role, record.source_path, record.sheet_name, record.row_number)
         )
     return len(row_error_keys) + non_row_error_count
+
+
+def _enrich_error_source_file_ids(
+    import_errors: list[ImportErrorRecord],
+    source_file_ids_by_role: dict[str, str],
+) -> list[ImportErrorRecord]:
+    return [
+        replace(record, source_file_id=source_file_ids_by_role.get(record.file_role))
+        if record.source_file_id is None and record.file_role in source_file_ids_by_role
+        else record
+        for record in import_errors
+    ]
 
 
 def _error_summary(
@@ -96,6 +109,10 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             run_id=run_id,
             sources=_input_sources(inputs),
         )
+        source_file_ids_by_role = {
+            str(item["source_role"]): str(item["source_file_id"])
+            for item in result.archived_files
+        }
         import_errors: list[ImportErrorRecord] = []
         success_rows = 0
 
@@ -152,6 +169,7 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             import_errors.extend(claim_result.import_errors)
             success_rows += claim_result.success_rows
 
+        import_errors = _enrich_error_source_file_ids(import_errors, source_file_ids_by_role)
         write_import_errors(connection, import_errors)
         result.import_errors = [record.as_dict() for record in import_errors]
         result.error_count = sum(1 for record in import_errors if record.severity == "blocking")
@@ -162,8 +180,8 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             connection,
             run_id,
             success_rows=success_rows,
-            error_rows=_blocking_error_row_count(import_errors),
-            warning_rows=result.warning_count,
+            error_rows=_error_row_count(import_errors, "blocking"),
+            warning_rows=_error_row_count(import_errors, "warning"),
             error_summary=_error_summary(result.skipped_rows, import_errors),
         )
         return result

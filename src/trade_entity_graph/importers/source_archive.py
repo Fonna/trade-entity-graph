@@ -36,11 +36,13 @@ def archive_source_files(
 
     archived_files: list[ArchivedFile] = []
     for source_role, source_path in sources:
+        source_file_id = new_id("SRC")
         original_path = Path(source_path)
         archived_path = run_archive_dir / f"{source_role}__{original_path.name}"
         shutil.copy2(original_path, archived_path)
 
         metadata: ArchivedFile = {
+            "source_file_id": source_file_id,
             "source_role": source_role,
             "original_path": str(original_path.resolve()),
             "archived_path": str(archived_path.resolve()),
@@ -57,7 +59,7 @@ def archive_source_files(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                new_id("SRC"),
+                source_file_id,
                 run_id,
                 metadata["source_role"],
                 metadata["original_path"],
