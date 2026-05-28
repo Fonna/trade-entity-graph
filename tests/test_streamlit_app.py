@@ -553,6 +553,136 @@ def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) ->
     }
 
 
+
+class ImportQualityFakeStreamlit:
+    def __init__(
+        self,
+        *,
+        selected_run_id: str = "",
+        buttons: dict[str, bool] | None = None,
+    ) -> None:
+        self.selected_run_id = selected_run_id
+        self.buttons = buttons or {}
+        self.errors: list[str] = []
+        self.infos: list[str] = []
+        self.warnings: list[str] = []
+        self.frames: list[object] = []
+        self.downloads: list[dict[str, object]] = []
+        self.json_payloads: list[object] = []
+
+    def subheader(self, *_args, **_kwargs) -> None:
+        return None
+
+    def text_input(self, label, value="", **_kwargs) -> str:
+        if "run_id" in str(label):
+            return self.selected_run_id
+        return value
+
+    def button(self, label, **_kwargs) -> bool:
+        return self.buttons.get(str(label), False)
+
+    def success(self, *_args, **_kwargs) -> None:
+        return None
+
+    def info(self, message, **_kwargs) -> None:
+        self.infos.append(str(message))
+
+    def warning(self, message, **_kwargs) -> None:
+        self.warnings.append(str(message))
+
+    def error(self, message, **_kwargs) -> None:
+        self.errors.append(str(message))
+
+    def markdown(self, *_args, **_kwargs) -> None:
+        return None
+
+    def dataframe(self, records, **_kwargs) -> None:
+        self.frames.append(records)
+
+    def json(self, payload, **_kwargs) -> None:
+        self.json_payloads.append(payload)
+
+    def download_button(self, label, **kwargs) -> None:
+        self.downloads.append({"label": label, **kwargs})
+
+
+def test_import_tab_handles_recent_batch_lookup_errors(monkeypatch) -> None:
+    fake_st = ImportQualityFakeStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+
+    def raise_missing_table(**_kwargs):
+        raise RuntimeError("no such table: import_batch")
+
+    monkeypatch.setattr(streamlit_app, "list_import_batches", raise_missing_table)
+
+    streamlit_app.render_import_tab()
+
+    assert fake_st.errors == ["no such table: import_batch"]
+
+
+def test_import_tab_detail_does_not_export_without_explicit_click(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+    fake_st = ImportQualityFakeStreamlit(
+        selected_run_id="RUN_DETAIL",
+        buttons={"\u5f00\u59cb\u5bfc\u5165": False},
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app, "list_import_batches", lambda **_kwargs: {"items": []})
+
+    def fake_get_detail(run_id: str):
+        calls.append(("detail", run_id))
+        return {"quality_summary": {}, "archived_files": [], "counts": {"orders": 2}}
+
+    def fake_list_errors(run_id: str, **_kwargs):
+        calls.append(("errors", run_id))
+        return {"items": [{"row_number": 3, "error_type": "missing_entity"}]}
+
+    def fail_export(_run_id: str):
+        raise AssertionError("export_import_errors should wait for an explicit click")
+
+    monkeypatch.setattr(streamlit_app, "get_import_batch_detail", fake_get_detail)
+    monkeypatch.setattr(streamlit_app, "list_import_errors", fake_list_errors)
+    monkeypatch.setattr(streamlit_app, "export_import_errors", fail_export)
+
+    streamlit_app.render_import_tab()
+
+    assert calls == [("detail", "RUN_DETAIL"), ("errors", "RUN_DETAIL")]
+    assert fake_st.downloads == []
+
+
+def test_import_tab_detail_exports_after_explicit_click(monkeypatch, tmp_path) -> None:
+    export_path = tmp_path / "RUN_DETAIL_import_errors.csv"
+    export_path.write_text("row_number,error_type\n3,missing_entity\n", encoding="utf-8")
+    calls: list[tuple[str, str]] = []
+    fake_st = ImportQualityFakeStreamlit(
+        selected_run_id="RUN_DETAIL",
+        buttons={"\u5f00\u59cb\u5bfc\u5165": False, "\u751f\u6210\u5f02\u5e38 CSV": True},
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app, "list_import_batches", lambda **_kwargs: {"items": []})
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_import_batch_detail",
+        lambda run_id: {"quality_summary": {}, "archived_files": [], "counts": {"orders": 2}},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_errors",
+        lambda run_id, **_kwargs: {"items": [{"row_number": 3, "error_type": "missing_entity"}]},
+    )
+
+    def fake_export(run_id: str):
+        calls.append(("export", run_id))
+        return {"path": str(export_path)}
+
+    monkeypatch.setattr(streamlit_app, "export_import_errors", fake_export)
+
+    streamlit_app.render_import_tab()
+
+    assert calls == [("export", "RUN_DETAIL")]
+    assert fake_st.downloads[0]["file_name"] == "RUN_DETAIL_import_errors.csv"
+    assert fake_st.downloads[0]["data"] == export_path.read_bytes()
+
 def test_review_queue_tab_displays_queue_and_sets_selected_claim(monkeypatch) -> None:
     class FakeColumn:
         def metric(self, *_args, **_kwargs) -> None:

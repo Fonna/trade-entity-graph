@@ -834,6 +834,64 @@ def render_intro() -> None:
                 st.markdown(f"- {item}")
 
 
+def _render_import_batch_detail(run_id: str) -> None:
+    """Render one import batch detail panel without letting backend errors crash UI."""
+
+    try:
+        detail = get_import_batch_detail(run_id)
+    except Exception as exc:
+        st.error(format_error_message(exc))
+        return
+
+    st.markdown("**批次质量状态**")
+    st.info(format_import_quality_status(detail.get("quality_summary", {})))
+    st.markdown("**归档文件**")
+    show_table(detail.get("archived_files", []))
+    st.markdown("**导入计数**")
+    st.json(detail.get("counts", {}))
+
+    try:
+        error_result = list_import_errors(run_id, limit=500)
+    except Exception as exc:
+        st.error(format_error_message(exc))
+        return
+
+    error_items = error_result.get("items", [])
+    st.markdown("**导入异常**")
+    show_table(error_items)
+    if not error_items:
+        return
+
+    if st.button("生成异常 CSV"):
+        try:
+            export_result = export_import_errors(run_id)
+            export_path = Path(str(export_result["path"]))
+            st.download_button(
+                "下载异常 CSV",
+                data=export_path.read_bytes(),
+                file_name=import_error_export_filename(run_id),
+                mime="text/csv",
+            )
+        except Exception as exc:
+            st.error(format_error_message(exc))
+
+
+def _render_import_quality_history() -> None:
+    """Render recent import quality history and optional selected batch detail."""
+
+    st.markdown("---")
+    st.subheader("最近导入批次")
+    try:
+        batches = list_import_batches(limit=10)
+    except Exception as exc:
+        st.error(format_error_message(exc))
+        batches = {"items": []}
+    show_table(batches.get("items", []))
+
+    selected_run_id = st.text_input("查看批次详情的 run_id")
+    if selected_run_id:
+        _render_import_batch_detail(selected_run_id)
+
 def render_import_tab() -> None:
     """Render the import workflow."""
 
@@ -885,33 +943,7 @@ def render_import_tab() -> None:
             with st.expander("查看本次导入异常"):
                 show_table(import_errors)
 
-    st.markdown("---")
-    st.subheader("最近导入批次")
-    batches = list_import_batches(limit=10)
-    show_table(batches.get("items", []))
-    selected_run_id = st.text_input("查看批次详情的 run_id")
-    if selected_run_id:
-        detail = get_import_batch_detail(selected_run_id)
-        st.markdown("**批次质量状态**")
-        st.info(format_import_quality_status(detail.get("quality_summary", {})))
-        st.markdown("**归档文件**")
-        show_table(detail.get("archived_files", []))
-        st.markdown("**导入计数**")
-        st.json(detail.get("counts", {}))
-        error_result = list_import_errors(selected_run_id, limit=500)
-        error_items = error_result.get("items", [])
-        st.markdown("**导入异常**")
-        show_table(error_items)
-        if error_items:
-            export_result = export_import_errors(selected_run_id)
-            export_path = Path(str(export_result["path"]))
-            st.download_button(
-                "下载异常 CSV",
-                data=export_path.read_bytes(),
-                file_name=import_error_export_filename(selected_run_id),
-                mime="text/csv",
-            )
-
+    _render_import_quality_history()
 
 def render_search_tab() -> None:
     """Render entity search."""
