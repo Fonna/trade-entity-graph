@@ -185,6 +185,125 @@ def test_run_import_records_invalid_relationship_numeric_and_keeps_entities(
     assert result.error_count == 1
 
 
+@pytest.mark.parametrize(
+    "relationship_columns",
+    [
+        {
+            "from_entity_name": ["ACME TRADING"],
+            "to_entity_name": ["BETA FACTORY"],
+            "candidate_relation_type": ["trading_partner_candidate"],
+            "confidence_score": [""],
+            "order_count": [""],
+            "total_teu": [""],
+        },
+        {
+            "from_entity_name": ["ACME TRADING"],
+            "to_entity_name": ["BETA FACTORY"],
+            "candidate_relation_type": ["trading_partner_candidate"],
+            "order_count": [""],
+        },
+    ],
+    ids=["blank_optional_numeric_values", "missing_optional_numeric_columns"],
+)
+def test_run_import_defaults_blank_or_missing_relationship_numeric_values(
+    tmp_path, monkeypatch, relationship_columns
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    relationships_path = tmp_path / "relationships.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING", "BETA FACTORY"],
+            "original_name": ["Acme Trading Ltd", "Beta Factory Inc"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(relationship_columns).to_csv(relationships_path, index=False)
+
+    result = run_import(
+        ImportInputs(
+            entities_path=entities_path,
+            relationships_path=relationships_path,
+            imported_by="tester",
+        ),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        claim = connection.execute(
+            """
+            SELECT confidence_score, order_count, total_teu
+            FROM relationship_claim
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+        import_error_count = connection.execute(
+            "SELECT COUNT(*) FROM import_error WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()[0]
+
+    assert claim is not None
+    assert claim["confidence_score"] is None
+    assert claim["order_count"] == 0
+    assert claim["total_teu"] == 0
+    assert import_error_count == 0
+    assert result.error_count == 0
+
+
+def test_run_import_prioritizes_self_relationship_error_over_invalid_numeric_values(
+    tmp_path, monkeypatch
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    relationships_path = tmp_path / "relationships.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING"],
+            "original_name": ["Acme Trading Ltd"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(
+        {
+            "from_entity_name": ["ACME TRADING"],
+            "to_entity_name": ["ACME TRADING"],
+            "candidate_relation_type": ["trading_partner_candidate"],
+            "confidence_score": ["not-a-number"],
+            "order_count": ["not-a-number"],
+            "total_teu": ["not-a-number"],
+        }
+    ).to_csv(relationships_path, index=False)
+
+    result = run_import(
+        ImportInputs(
+            entities_path=entities_path,
+            relationships_path=relationships_path,
+            imported_by="tester",
+        ),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        claim_count = connection.execute("SELECT COUNT(*) FROM relationship_claim").fetchone()[0]
+        errors = connection.execute(
+            """
+            SELECT error_type, normalized_field
+            FROM import_error
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchall()
+
+    assert claim_count == 0
+    assert [dict(error) for error in errors] == [
+        {"error_type": "invalid_relationship_pair", "normalized_field": "to_entity_id"}
+    ]
+    assert result.error_count == 1
+
+
 def test_run_import_records_errors_and_keeps_valid_rows(tmp_path, monkeypatch) -> None:
     entities_path = tmp_path / "entities.csv"
     orders_path = tmp_path / "orders.csv"
