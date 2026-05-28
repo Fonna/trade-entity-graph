@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from trade_entity_graph.ui import streamlit_app
 
 
@@ -564,6 +566,7 @@ class ImportQualityFakeStreamlit:
         self.buttons = buttons or {}
         self.errors: list[str] = []
         self.infos: list[str] = []
+        self.successes: list[str] = []
         self.warnings: list[str] = []
         self.frames: list[object] = []
         self.downloads: list[dict[str, object]] = []
@@ -580,8 +583,8 @@ class ImportQualityFakeStreamlit:
     def button(self, label, **_kwargs) -> bool:
         return self.buttons.get(str(label), False)
 
-    def success(self, *_args, **_kwargs) -> None:
-        return None
+    def success(self, message, **_kwargs) -> None:
+        self.successes.append(str(message))
 
     def info(self, message, **_kwargs) -> None:
         self.infos.append(str(message))
@@ -685,6 +688,175 @@ def test_import_tab_reports_edge_generation_failure_without_crashing(
 
     assert any("edge generation failed" in message for message in fake_st.errors)
     assert calls == ["generate:RUN_STREAMLIT_IMPORT", "history"]
+
+
+
+def _successful_import_result(*, claim_count: int = 0) -> SimpleNamespace:
+    return SimpleNamespace(
+        run_id="RUN_STREAMLIT_IMPORT",
+        entity_count=2,
+        alias_count=0,
+        evidence_count=1,
+        claim_count=claim_count,
+        skipped_rows=[],
+        archived_files=[],
+        import_errors=[],
+        warning_count=0,
+        error_count=0,
+        quality_summary={},
+    )
+
+
+def test_import_tab_reports_claim_aggregation_failure_and_renders_history(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    fake_st = ImportQualityFakeStreamlit(buttons={"\u5f00\u59cb\u5bfc\u5165": True})
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app, "run_import", lambda _inputs: _successful_import_result())
+    monkeypatch.setattr(
+        streamlit_app,
+        "generate_order_role_edges",
+        lambda *, run_id: {"edge_count": 1, "skipped_count": 0},
+    )
+
+    def raise_aggregation_failed(*, run_id):
+        calls.append(f"aggregate:{run_id}")
+        raise RuntimeError("claim aggregation failed")
+
+    def fail_history_reuse(*_args, **_kwargs):
+        calls.append("history_reuse")
+        raise AssertionError("history reuse should be skipped")
+
+    def fake_list_import_batches(**_kwargs):
+        calls.append("history")
+        return {"items": []}
+
+    monkeypatch.setattr(streamlit_app, "aggregate_relationship_claims", raise_aggregation_failed)
+    monkeypatch.setattr(streamlit_app, "apply_history_reuse_to_claims", fail_history_reuse)
+    monkeypatch.setattr(streamlit_app, "list_import_batches", fake_list_import_batches)
+
+    streamlit_app.render_import_tab()
+
+    assert any("claim aggregation failed" in message for message in fake_st.errors)
+    assert fake_st.successes == []
+    assert fake_st.json_payloads == []
+    assert calls == ["aggregate:RUN_STREAMLIT_IMPORT", "history"]
+
+
+def test_import_tab_reports_history_reuse_failure_after_generated_edges(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    fake_st = ImportQualityFakeStreamlit(buttons={"\u5f00\u59cb\u5bfc\u5165": True})
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app, "run_import", lambda _inputs: _successful_import_result())
+    monkeypatch.setattr(
+        streamlit_app,
+        "generate_order_role_edges",
+        lambda *, run_id: {"edge_count": 1, "skipped_count": 0},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "aggregate_relationship_claims",
+        lambda *, run_id: {"claim_count": 1},
+    )
+
+    def raise_history_reuse_failed(*, run_id):
+        calls.append(f"history_reuse:{run_id}")
+        raise RuntimeError("history reuse failed after edges")
+
+    monkeypatch.setattr(streamlit_app, "apply_history_reuse_to_claims", raise_history_reuse_failed)
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_batches",
+        lambda **_kwargs: calls.append("history") or {"items": []},
+    )
+
+    streamlit_app.render_import_tab()
+
+    assert any("history reuse failed after edges" in message for message in fake_st.errors)
+    assert fake_st.successes == []
+    assert fake_st.json_payloads == []
+    assert calls == ["history_reuse:RUN_STREAMLIT_IMPORT", "history"]
+
+
+def test_import_tab_reports_history_reuse_failure_after_imported_claims(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    fake_st = ImportQualityFakeStreamlit(buttons={"\u5f00\u59cb\u5bfc\u5165": True})
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "run_import",
+        lambda _inputs: _successful_import_result(claim_count=2),
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "generate_order_role_edges",
+        lambda *, run_id: {"edge_count": 0, "skipped_count": 0},
+    )
+
+    def fail_aggregate(*_args, **_kwargs):
+        calls.append("aggregate")
+        raise AssertionError("aggregate should be skipped when no edges were generated")
+
+    def raise_history_reuse_failed(*, run_id):
+        calls.append(f"history_reuse:{run_id}")
+        raise RuntimeError("history reuse failed after imported claims")
+
+    monkeypatch.setattr(streamlit_app, "aggregate_relationship_claims", fail_aggregate)
+    monkeypatch.setattr(streamlit_app, "apply_history_reuse_to_claims", raise_history_reuse_failed)
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_batches",
+        lambda **_kwargs: calls.append("history") or {"items": []},
+    )
+
+    streamlit_app.render_import_tab()
+
+    assert any(
+        "history reuse failed after imported claims" in message for message in fake_st.errors
+    )
+    assert fake_st.successes == []
+    assert fake_st.json_payloads == []
+    assert calls == ["history_reuse:RUN_STREAMLIT_IMPORT", "history"]
+
+
+def test_import_tab_display_json_failure_is_not_reported_as_operation_error(
+    monkeypatch,
+) -> None:
+    fake_st = ImportQualityFakeStreamlit(buttons={"\u5f00\u59cb\u5bfc\u5165": True})
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app, "run_import", lambda _inputs: _successful_import_result())
+    monkeypatch.setattr(
+        streamlit_app,
+        "generate_order_role_edges",
+        lambda *, run_id: {"edge_count": 1, "skipped_count": 0},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "aggregate_relationship_claims",
+        lambda *, run_id: {"claim_count": 1},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "apply_history_reuse_to_claims",
+        lambda *, run_id: {"history_matched": 0, "history_conflict": 0, "unchanged": 1},
+    )
+    monkeypatch.setattr(streamlit_app, "list_import_batches", lambda **_kwargs: {"items": []})
+
+    def raise_json_failed(_payload, **_kwargs):
+        raise RuntimeError("json display failed")
+
+    monkeypatch.setattr(fake_st, "json", raise_json_failed)
+
+    with pytest.raises(RuntimeError, match="json display failed"):
+        streamlit_app.render_import_tab()
+
+    assert fake_st.errors == []
+    assert len(fake_st.successes) == 1
 
 
 def test_import_tab_handles_recent_batch_lookup_errors(monkeypatch) -> None:

@@ -921,6 +921,9 @@ def render_import_tab() -> None:
                 history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
             else:
                 claim_result = {"claim_count": 0}
+        except Exception as exc:
+            st.error(format_error_message(exc))
+        else:
             st.success(f"导入完成，批次号：{result.run_id}")
             if result.archived_files:
                 st.info(f"原始文件已归档到 data/raw/imports/{result.run_id}/")
@@ -943,9 +946,6 @@ def render_import_tab() -> None:
             if import_errors:
                 with st.expander("查看本次导入异常"):
                     show_table(import_errors)
-
-        except Exception as exc:
-            st.error(format_error_message(exc))
     _render_import_quality_history()
 
 
