@@ -124,6 +124,47 @@ def _seed_import_quality_fixture(db_path: Path) -> None:
         connection.commit()
 
 
+def _seed_many_import_errors(db_path: Path, count: int = 1005) -> None:
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (
+                run_id,
+                source_file,
+                imported_by,
+                success_rows,
+                error_rows,
+                warning_rows
+            )
+            VALUES ('RUN_MANY', 'orders.csv', 'tester', 0, ?, 0)
+            """,
+            (count,),
+        )
+        connection.executemany(
+            """
+            INSERT INTO import_error (
+                error_id,
+                run_id,
+                file_role,
+                source_path,
+                sheet_name,
+                row_number,
+                column_name,
+                normalized_field,
+                raw_value,
+                error_type,
+                severity,
+                message
+            )
+            VALUES (?, 'RUN_MANY', 'orders', 'orders.csv', 'orders', ?, 'TEU', 'teu', 'abc',
+                    'invalid_numeric_value', 'blocking', 'TEU must be numeric')
+            """,
+            [(f"IER_MANY_{index:04d}", index) for index in range(1, count + 1)],
+        )
+        connection.commit()
+
+
 def test_import_quality_service_reports_counts_and_exports(tmp_path: Path) -> None:
     db_path = tmp_path / "quality.db"
     output_path = tmp_path / "errors.csv"
@@ -145,3 +186,15 @@ def test_import_quality_service_reports_counts_and_exports(tmp_path: Path) -> No
     }
     assert export["row_count"] == 2
     assert "invalid_numeric_value" in output_path.read_text(encoding="utf-8")
+
+
+def test_import_quality_report_and_export_include_all_errors(tmp_path: Path) -> None:
+    db_path = tmp_path / "quality.db"
+    output_path = tmp_path / "many_errors.csv"
+    _seed_many_import_errors(db_path)
+
+    report = get_import_quality_report("RUN_MANY", db_path=db_path)
+    export = export_import_errors("RUN_MANY", output_path=output_path, db_path=db_path)
+
+    assert len(report["errors"]) == 1005
+    assert export["row_count"] == 1005

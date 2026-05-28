@@ -38,6 +38,27 @@ def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def _import_error_order_by() -> str:
+    return """
+        CASE severity WHEN 'blocking' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+        created_at,
+        error_id
+    """
+
+
+def _list_all_import_errors(connection: Any, run_id: str) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        f"""
+        SELECT *
+        FROM import_error
+        WHERE run_id = ?
+        ORDER BY {_import_error_order_by()}
+        """,
+        (run_id,),
+    ).fetchall()
+    return _rows_to_dicts(rows)
+
+
 def _quality_summary(connection: Any, run_id: str) -> dict[str, Any]:
     severity_rows = connection.execute(
         """
@@ -251,10 +272,7 @@ def list_import_errors(
             SELECT *
             FROM import_error
             WHERE {where_clause}
-            ORDER BY
-                CASE severity WHEN 'blocking' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
-                created_at,
-                error_id
+            ORDER BY {_import_error_order_by()}
             LIMIT ? OFFSET ?
             """,
             (*params, safe_limit, safe_offset),
@@ -287,8 +305,18 @@ def get_import_quality_report(
     """Return batch detail plus all import errors for a run."""
 
     detail = get_import_batch_detail(run_id, db_path=db_path)
-    errors = list_import_errors(run_id, limit=1000, db_path=db_path)
-    return {**detail, "errors": errors["items"], "error_summary": errors["summary"]}
+    with get_connection(db_path) as connection:
+        errors = _list_all_import_errors(connection, run_id)
+    return {
+        **detail,
+        "errors": errors,
+        "error_summary": {
+            "total_count": len(errors),
+            "returned_count": len(errors),
+            "offset": 0,
+            "limit": len(errors),
+        },
+    }
 
 
 def export_import_errors(
@@ -306,7 +334,8 @@ def export_import_errors(
         else Path("data") / "exports" / f"{run_id}_import_errors.csv"
     )
     target.parent.mkdir(parents=True, exist_ok=True)
-    errors = list_import_errors(run_id, limit=1000, db_path=db_path)["items"]
+    with get_connection(db_path) as connection:
+        errors = _list_all_import_errors(connection, run_id)
 
     with target.open("w", encoding="utf-8-sig", newline="") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=ERROR_EXPORT_COLUMNS, extrasaction="ignore")
