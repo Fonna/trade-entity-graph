@@ -117,6 +117,73 @@ def test_run_import_allows_entities_without_country_or_entity_type(tmp_path, mon
     assert row["entity_type"] is None
 
 
+def test_run_import_records_invalid_relationship_numeric_and_keeps_entities(
+    tmp_path, monkeypatch
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    relationships_path = tmp_path / "relationships.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING", "BETA FACTORY"],
+            "original_name": ["Acme Trading Ltd", "Beta Factory Inc"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(
+        {
+            "from_entity_name": ["ACME TRADING"],
+            "to_entity_name": ["BETA FACTORY"],
+            "candidate_relation_type": ["trading_partner_candidate"],
+            "confidence_score": ["0.8"],
+            "order_count": ["2"],
+            "total_teu": ["not-a-number"],
+        }
+    ).to_csv(relationships_path, index=False)
+
+    result = run_import(
+        ImportInputs(
+            entities_path=entities_path,
+            relationships_path=relationships_path,
+            imported_by="tester",
+        ),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        entity_count = connection.execute("SELECT COUNT(*) FROM entity").fetchone()[0]
+        claim_count = connection.execute("SELECT COUNT(*) FROM relationship_claim").fetchone()[0]
+        error = connection.execute(
+            """
+            SELECT file_role, error_type, severity, normalized_field
+            FROM import_error
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+        batch = connection.execute(
+            """
+            SELECT success_rows, error_rows, warning_rows
+            FROM import_batch
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    assert entity_count == 2
+    assert claim_count == 0
+    assert dict(error) == {
+        "file_role": "relationships",
+        "error_type": "invalid_numeric_value",
+        "severity": "blocking",
+        "normalized_field": "total_teu",
+    }
+    assert batch["success_rows"] == 2
+    assert batch["error_rows"] == 1
+    assert batch["warning_rows"] == 0
+    assert result.error_count == 1
+
 
 def test_run_import_records_errors_and_keeps_valid_rows(tmp_path, monkeypatch) -> None:
     entities_path = tmp_path / "entities.csv"

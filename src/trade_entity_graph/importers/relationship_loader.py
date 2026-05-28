@@ -83,6 +83,30 @@ def _append_endpoint_error(
     )
 
 
+def _append_numeric_error(
+    result: RelationshipClaimLoadResult,
+    row: ImportSourceRow,
+    *,
+    run_id: str,
+    normalized_field: str,
+    raw_value: Any,
+) -> None:
+    result.import_errors.append(
+        ImportErrorRecord(
+            run_id=run_id,
+            error_type="invalid_numeric_value",
+            severity="blocking",
+            message=f"{normalized_field} must be numeric.",
+            file_role="relationships",
+            source_path=row.source_file,
+            sheet_name=row.source_sheet,
+            row_number=row.source_row,
+            normalized_field=normalized_field,
+            raw_value=raw_value,
+        )
+    )
+
+
 def load_relationship_claims(
     connection: sqlite3.Connection,
     rows: list[ImportSourceRow],
@@ -152,6 +176,33 @@ def load_relationship_claims(
             )
             continue
 
+        raw_confidence_score = get_value(row.values, "confidence_score")
+        raw_order_count = get_value(row.values, "order_count")
+        raw_total_teu = get_value(row.values, "total_teu")
+        numeric_values: dict[str, float | int | None] = {}
+        has_numeric_error = False
+        for field_name, raw_value, parser in (
+            ("confidence_score", raw_confidence_score, _to_float),
+            ("order_count", raw_order_count, _to_int),
+            ("total_teu", raw_total_teu, _to_float),
+        ):
+            try:
+                numeric_values[field_name] = parser(raw_value)
+            except (TypeError, ValueError):
+                has_numeric_error = True
+                _append_numeric_error(
+                    result,
+                    row,
+                    run_id=run_id,
+                    normalized_field=field_name,
+                    raw_value=raw_value,
+                )
+        if has_numeric_error:
+            result.skipped_rows.append(
+                f"{row.source_file}:{row.source_row}: invalid relationship numeric value"
+            )
+            continue
+
         connection.execute(
             """
             INSERT INTO relationship_claim (
@@ -167,9 +218,9 @@ def load_relationship_claims(
                 to_entity_id,
                 get_value(row.values, "candidate_relation_type", "trading_partner_candidate"),
                 get_value(row.values, "confidence_level"),
-                _to_float(get_value(row.values, "confidence_score")),
-                _to_int(get_value(row.values, "order_count")),
-                _to_float(get_value(row.values, "total_teu")) or 0,
+                numeric_values["confidence_score"],
+                numeric_values["order_count"],
+                numeric_values["total_teu"] or 0,
                 get_value(row.values, "recommendation_reason"),
                 run_id,
             ),
