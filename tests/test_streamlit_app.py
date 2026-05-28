@@ -553,7 +553,6 @@ def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) ->
     }
 
 
-
 class ImportQualityFakeStreamlit:
     def __init__(
         self,
@@ -604,6 +603,88 @@ class ImportQualityFakeStreamlit:
 
     def download_button(self, label, **kwargs) -> None:
         self.downloads.append({"label": label, **kwargs})
+
+
+def test_import_tab_reports_run_import_failure_and_skips_derived_steps(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    fake_st = ImportQualityFakeStreamlit(buttons={"\u5f00\u59cb\u5bfc\u5165": True})
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+
+    def raise_missing_file(_inputs):
+        calls.append("run_import")
+        raise FileNotFoundError("missing.csv")
+
+    def fail_if_called(*_args, **_kwargs):
+        calls.append("derived")
+        raise AssertionError("derived import steps should be skipped")
+
+    def fake_list_import_batches(**_kwargs):
+        calls.append("history")
+        return {"items": []}
+
+    monkeypatch.setattr(streamlit_app, "run_import", raise_missing_file)
+    monkeypatch.setattr(streamlit_app, "generate_order_role_edges", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "aggregate_relationship_claims", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "apply_history_reuse_to_claims", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "list_import_batches", fake_list_import_batches)
+
+    streamlit_app.render_import_tab()
+
+    assert any("missing.csv" in message for message in fake_st.errors)
+    assert calls == ["run_import", "history"]
+
+
+def test_import_tab_reports_edge_generation_failure_without_crashing(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    fake_st = ImportQualityFakeStreamlit(buttons={"\u5f00\u59cb\u5bfc\u5165": True})
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "run_import",
+        lambda _inputs: SimpleNamespace(
+            run_id="RUN_STREAMLIT_IMPORT",
+            entity_count=2,
+            alias_count=0,
+            evidence_count=1,
+            claim_count=0,
+            skipped_rows=[],
+            archived_files=[],
+            import_errors=[],
+            warning_count=0,
+            error_count=0,
+            quality_summary={},
+        ),
+    )
+
+    def raise_edge_generation_failed(*, run_id):
+        calls.append(f"generate:{run_id}")
+        raise RuntimeError("edge generation failed")
+
+    def fail_if_called(*_args, **_kwargs):
+        calls.append("downstream")
+        raise AssertionError("downstream import steps should be skipped")
+
+    def fake_list_import_batches(**_kwargs):
+        calls.append("history")
+        return {"items": []}
+
+    monkeypatch.setattr(
+        streamlit_app,
+        "generate_order_role_edges",
+        raise_edge_generation_failed,
+    )
+    monkeypatch.setattr(streamlit_app, "aggregate_relationship_claims", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "apply_history_reuse_to_claims", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "list_import_batches", fake_list_import_batches)
+
+    streamlit_app.render_import_tab()
+
+    assert any("edge generation failed" in message for message in fake_st.errors)
+    assert calls == ["generate:RUN_STREAMLIT_IMPORT", "history"]
 
 
 def test_import_tab_handles_recent_batch_lookup_errors(monkeypatch) -> None:

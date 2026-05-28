@@ -901,49 +901,53 @@ def render_import_tab() -> None:
     relationships_path = st.text_input("已有关系候选文件路径")
     imported_by = st.text_input("导入人", value="local_user")
     if st.button("开始导入"):
-        result = run_import(
-            ImportInputs(
-                entities_path=Path(entities_path) if entities_path else None,
-                orders_path=Path(orders_path) if orders_path else None,
-                relationships_path=Path(relationships_path) if relationships_path else None,
-                imported_by=imported_by,
+        try:
+            result = run_import(
+                ImportInputs(
+                    entities_path=Path(entities_path) if entities_path else None,
+                    orders_path=Path(orders_path) if orders_path else None,
+                    relationships_path=Path(relationships_path) if relationships_path else None,
+                    imported_by=imported_by,
+                )
             )
-        )
-        edge_result = generate_order_role_edges(run_id=result.run_id)
-        edge_count = edge_result.get("edge_count", 0)
-        history_reuse = {"history_matched": 0, "history_conflict": 0, "unchanged": 0}
-        if edge_count > 0:
-            claim_result = aggregate_relationship_claims(run_id=result.run_id)
-            history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
-        elif result.claim_count > 0:
-            claim_result = {"claim_count": result.claim_count}
-            history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
-        else:
-            claim_result = {"claim_count": 0}
-        st.success(f"导入完成，批次号：{result.run_id}")
-        if result.archived_files:
-            st.info(f"原始文件已归档到 data/raw/imports/{result.run_id}/")
-            show_table(result.archived_files)
-        st.json(
-            {**result.__dict__, **edge_result, **claim_result, "history_reuse": history_reuse}
-        )
-        quality_summary = getattr(result, "quality_summary", None)
-        if quality_summary:
-            st.markdown("**导入质量摘要**")
-            st.info(format_import_quality_status(quality_summary))
-            error_count_by_type = quality_summary.get("error_count_by_type") or {}
-            show_table(
-                [
-                    {"error_type": error_type, "count": count}
-                    for error_type, count in error_count_by_type.items()
-                ]
+            edge_result = generate_order_role_edges(run_id=result.run_id)
+            edge_count = edge_result.get("edge_count", 0)
+            history_reuse = {"history_matched": 0, "history_conflict": 0, "unchanged": 0}
+            if edge_count > 0:
+                claim_result = aggregate_relationship_claims(run_id=result.run_id)
+                history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
+            elif result.claim_count > 0:
+                claim_result = {"claim_count": result.claim_count}
+                history_reuse = apply_history_reuse_to_claims(run_id=result.run_id)
+            else:
+                claim_result = {"claim_count": 0}
+            st.success(f"导入完成，批次号：{result.run_id}")
+            if result.archived_files:
+                st.info(f"原始文件已归档到 data/raw/imports/{result.run_id}/")
+                show_table(result.archived_files)
+            st.json(
+                {**result.__dict__, **edge_result, **claim_result, "history_reuse": history_reuse}
             )
-        import_errors = getattr(result, "import_errors", None)
-        if import_errors:
-            with st.expander("查看本次导入异常"):
-                show_table(import_errors)
+            quality_summary = getattr(result, "quality_summary", None)
+            if quality_summary:
+                st.markdown("**导入质量摘要**")
+                st.info(format_import_quality_status(quality_summary))
+                error_count_by_type = quality_summary.get("error_count_by_type") or {}
+                show_table(
+                    [
+                        {"error_type": error_type, "count": count}
+                        for error_type, count in error_count_by_type.items()
+                    ]
+                )
+            import_errors = getattr(result, "import_errors", None)
+            if import_errors:
+                with st.expander("查看本次导入异常"):
+                    show_table(import_errors)
 
+        except Exception as exc:
+            st.error(format_error_message(exc))
     _render_import_quality_history()
+
 
 def render_search_tab() -> None:
     """Render entity search."""
