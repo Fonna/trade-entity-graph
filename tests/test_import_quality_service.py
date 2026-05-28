@@ -2,11 +2,13 @@ from pathlib import Path
 
 from trade_entity_graph.db.connection import get_connection, initialize_database
 from trade_entity_graph.services.import_quality_service import (
+    ERROR_EXPORT_COLUMNS,
     export_import_errors,
     get_import_batch_detail,
     get_import_quality_report,
     list_import_batches,
     list_import_errors,
+    render_import_errors_csv,
 )
 
 
@@ -198,6 +200,20 @@ def test_import_quality_report_and_export_include_all_errors(tmp_path: Path) -> 
 
     assert len(report["errors"]) == 1005
     assert export["row_count"] == 1005
+
+
+def test_render_import_errors_csv_returns_utf8_sig_bytes_with_export_columns(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "quality.db"
+    _seed_import_quality_fixture(db_path)
+
+    content = render_import_errors_csv("RUN_QA", db_path=db_path)
+
+    assert content.startswith(b"\xef\xbb\xbf")
+    text = content.decode("utf-8-sig")
+    assert text.splitlines()[0] == ",".join(ERROR_EXPORT_COLUMNS)
+    assert "invalid_numeric_value" in text
 
 
 def test_export_import_errors_default_path_sanitizes_run_id(

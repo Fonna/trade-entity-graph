@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import re
 from pathlib import Path
 from typing import Any
@@ -343,6 +344,35 @@ def get_import_quality_report(
     }
 
 
+def _render_import_errors_csv_payload(
+    run_id: str,
+    *,
+    db_path: str | Path | None = None,
+) -> tuple[bytes, int]:
+    with get_connection(db_path) as connection:
+        _ensure_import_batch_exists(connection, run_id)
+        errors = _list_all_import_errors(connection, run_id)
+
+    csv_buffer = io.StringIO()
+    writer = csv.DictWriter(
+        csv_buffer, fieldnames=ERROR_EXPORT_COLUMNS, extrasaction="ignore"
+    )
+    writer.writeheader()
+    writer.writerows(errors)
+    return csv_buffer.getvalue().encode("utf-8-sig"), len(errors)
+
+
+def render_import_errors_csv(
+    run_id: str,
+    *,
+    db_path: str | Path | None = None,
+) -> bytes:
+    """Render all import errors for a run as UTF-8-SIG CSV bytes."""
+
+    content, _row_count = _render_import_errors_csv_payload(run_id, db_path=db_path)
+    return content
+
+
 def export_import_errors(
     run_id: str,
     *,
@@ -351,19 +381,13 @@ def export_import_errors(
 ) -> dict[str, Any]:
     """Export all import errors for a run as UTF-8-SIG CSV."""
 
-    get_import_batch_detail(run_id, db_path=db_path)
+    content, row_count = _render_import_errors_csv_payload(run_id, db_path=db_path)
     target = (
         Path(output_path)
         if output_path
         else Path("data") / "exports" / import_errors_export_filename(run_id)
     )
     target.parent.mkdir(parents=True, exist_ok=True)
-    with get_connection(db_path) as connection:
-        errors = _list_all_import_errors(connection, run_id)
+    target.write_bytes(content)
 
-    with target.open("w", encoding="utf-8-sig", newline="") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=ERROR_EXPORT_COLUMNS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(errors)
-
-    return {"path": str(target), "row_count": len(errors)}
+    return {"path": str(target), "row_count": row_count}

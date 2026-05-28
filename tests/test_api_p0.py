@@ -1283,6 +1283,12 @@ def test_imports_api_exports_batch_errors_csv(tmp_path, monkeypatch) -> None:
         connection.commit()
 
     from trade_entity_graph.api.main import create_app
+    from trade_entity_graph.api.routers import imports as imports_router
+
+    def fail_file_export(*args, **kwargs):
+        raise AssertionError("API export should not use file export helper")
+
+    monkeypatch.setattr(imports_router, "export_import_errors", fail_file_export)
 
     status, headers, content = _raw_request(
         create_app(), "GET", "/imports/RUN_API_EXPORT/errors/export"

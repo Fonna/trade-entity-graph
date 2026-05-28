@@ -9,14 +9,15 @@ from pydantic import BaseModel
 
 from trade_entity_graph.importers.models import ImportInputs
 from trade_entity_graph.importers.pipeline import run_import
+from trade_entity_graph.services import import_quality_service as _import_quality_service
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
 from trade_entity_graph.services.import_quality_service import (
-    export_import_errors,
     get_import_batch_detail,
     get_import_quality_report,
     import_errors_export_filename,
     list_import_batches,
     list_import_errors,
+    render_import_errors_csv,
 )
 from trade_entity_graph.services.relationship_service import (
     aggregate_relationship_claims,
@@ -24,6 +25,10 @@ from trade_entity_graph.services.relationship_service import (
 )
 
 router = APIRouter(prefix="/imports", tags=["imports"])
+
+# Preserve the legacy router attribute for downstream monkeypatches; the endpoint
+# renders CSV in memory via render_import_errors_csv instead of calling it.
+export_import_errors = _import_quality_service.export_import_errors
 
 
 class ImportRunRequest(BaseModel):
@@ -90,11 +95,10 @@ def list_import_errors_endpoint(
 @router.get("/{run_id}/errors/export")
 def export_import_errors_endpoint(run_id: str) -> Response:
     try:
-        export_result = export_import_errors(run_id)
+        content = render_import_errors_csv(run_id)
     except ValueError as exc:
         raise _not_found_from_value_error(exc) from exc
 
-    content = Path(str(export_result["path"])).read_bytes()
     filename = import_errors_export_filename(run_id)
     return Response(
         content=content,
