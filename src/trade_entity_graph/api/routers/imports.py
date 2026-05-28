@@ -37,6 +37,17 @@ def _not_found_from_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
 
 
+def _import_failure_detail(exc: Exception, inputs: ImportInputs) -> str:
+    paths = [
+        str(path)
+        for path in (inputs.orders_path, inputs.entities_path, inputs.relationships_path)
+        if path is not None
+    ]
+    path_text = f" for {', '.join(paths)}" if paths else ""
+    exc_text = str(exc) or exc.__class__.__name__
+    return f"Import file failure{path_text}: {exc_text}"
+
+
 @router.get("")
 def list_import_batches_endpoint(
     limit: int = Query(20, ge=1, le=200),
@@ -84,16 +95,20 @@ def get_import_quality_report_endpoint(run_id: str) -> dict[str, object]:
 
 @router.post("/run")
 def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
-    result = run_import(
-        ImportInputs(
-            orders_path=Path(request.orders_path) if request.orders_path else None,
-            entities_path=Path(request.entities_path) if request.entities_path else None,
-            relationships_path=(
-                Path(request.relationships_path) if request.relationships_path else None
-            ),
-            imported_by=request.imported_by,
-        )
+    inputs = ImportInputs(
+        orders_path=Path(request.orders_path) if request.orders_path else None,
+        entities_path=Path(request.entities_path) if request.entities_path else None,
+        relationships_path=(
+            Path(request.relationships_path) if request.relationships_path else None
+        ),
+        imported_by=request.imported_by,
     )
+    try:
+        result = run_import(inputs)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail=_import_failure_detail(exc, inputs)
+        ) from exc
     edge_count = 0
     claim_count = result.claim_count
     history_reuse = {"history_matched": 0, "history_conflict": 0, "unchanged": 0}

@@ -87,6 +87,104 @@ def _error_summary(
     return None
 
 
+def _same_path(left: Path, right: Path) -> bool:
+    if str(left) == str(right):
+        return True
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return False
+
+
+def _source_from_exception(
+    sources: list[tuple[str, Path]],
+    exc: BaseException,
+) -> tuple[str | None, Path | None]:
+    exception_paths = [
+        Path(value)
+        for value in (getattr(exc, "filename", None), getattr(exc, "filename2", None))
+        if value
+    ]
+    for role, source_path in sources:
+        if any(_same_path(source_path, exception_path) for exception_path in exception_paths):
+            return role, source_path
+    for role, source_path in sources:
+        if not source_path.exists():
+            return role, source_path
+    return sources[0] if sources else (None, None)
+
+
+def _file_failure_message(
+    exc: BaseException,
+    *,
+    role: str | None,
+    path: Path | None,
+) -> str:
+    role_text = f"{role} " if role else ""
+    path_text = f" at {path}" if path is not None else ""
+    exc_text = str(exc) or exc.__class__.__name__
+    return f"Failed to read {role_text}import file{path_text}: {exc_text}"
+
+
+def _record_file_read_failure(
+    connection,
+    *,
+    run_id: str,
+    exc: BaseException,
+    role: str | None,
+    path: Path | None,
+    source_file_id: str | None = None,
+) -> None:
+    message = _file_failure_message(exc, role=role, path=path)
+    write_import_errors(
+        connection,
+        [
+            ImportErrorRecord(
+                run_id=run_id,
+                source_file_id=source_file_id,
+                file_role=role,
+                source_path=str(path) if path is not None else None,
+                error_type="file_read_error",
+                severity="blocking",
+                message=message,
+            )
+        ],
+    )
+    finish_import_batch(
+        connection,
+        run_id,
+        success_rows=0,
+        error_rows=1,
+        warning_rows=0,
+        error_summary=message,
+    )
+
+
+def _read_rows_or_record_file_failure(
+    connection,
+    *,
+    run_id: str,
+    role: str,
+    path: Path,
+    source_file_id: str | None,
+):
+    try:
+        return read_tabular_rows(path)
+    except (OSError, ValueError) as exc:
+        try:
+            _record_file_read_failure(
+                connection,
+                run_id=run_id,
+                exc=exc,
+                role=role,
+                path=path,
+                source_file_id=source_file_id,
+            )
+        except Exception as persistence_exc:
+            exc.add_note(f"Failed to persist import file failure: {persistence_exc}")
+        raise
+
+
 def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> ImportRunResult:
     """Run the M2 import pipeline for the provided input files."""
 
@@ -104,11 +202,26 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             rule_version=settings.rule_version,
         )
         result = ImportRunResult(run_id=run_id)
-        result.archived_files = archive_source_files(
-            connection,
-            run_id=run_id,
-            sources=_input_sources(inputs),
-        )
+        input_sources = _input_sources(inputs)
+        try:
+            result.archived_files = archive_source_files(
+                connection,
+                run_id=run_id,
+                sources=input_sources,
+            )
+        except OSError as exc:
+            role, path = _source_from_exception(input_sources, exc)
+            try:
+                _record_file_read_failure(
+                    connection,
+                    run_id=run_id,
+                    exc=exc,
+                    role=role,
+                    path=path,
+                )
+            except Exception as persistence_exc:
+                exc.add_note(f"Failed to persist import file failure: {persistence_exc}")
+            raise
         source_file_ids_by_role = {
             str(item["source_role"]): str(item["source_file_id"])
             for item in result.archived_files
@@ -118,7 +231,13 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
 
         if inputs.entities_path is not None:
             entity_rows, mapping_errors = resolve_rows_for_role(
-                read_tabular_rows(inputs.entities_path),
+                _read_rows_or_record_file_failure(
+                    connection,
+                    run_id=run_id,
+                    role="entities",
+                    path=Path(inputs.entities_path),
+                    source_file_id=source_file_ids_by_role.get("entities"),
+                ),
                 role="entities",
                 run_id=run_id,
             )
@@ -137,7 +256,13 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
 
         if inputs.orders_path is not None:
             order_rows, mapping_errors = resolve_rows_for_role(
-                read_tabular_rows(inputs.orders_path),
+                _read_rows_or_record_file_failure(
+                    connection,
+                    run_id=run_id,
+                    role="orders",
+                    path=Path(inputs.orders_path),
+                    source_file_id=source_file_ids_by_role.get("orders"),
+                ),
                 role="orders",
                 run_id=run_id,
             )
@@ -154,7 +279,13 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
 
         if inputs.relationships_path is not None:
             relationship_rows, mapping_errors = resolve_rows_for_role(
-                read_tabular_rows(inputs.relationships_path),
+                _read_rows_or_record_file_failure(
+                    connection,
+                    run_id=run_id,
+                    role="relationships",
+                    path=Path(inputs.relationships_path),
+                    source_file_id=source_file_ids_by_role.get("relationships"),
+                ),
                 role="relationships",
                 run_id=run_id,
             )

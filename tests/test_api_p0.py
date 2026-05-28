@@ -1370,3 +1370,22 @@ def test_import_run_endpoint_includes_quality_summary(monkeypatch) -> None:
     }
     assert payload["error_count"] == 1
     assert payload["warning_count"] == 0
+
+
+def test_import_run_api_returns_400_for_missing_file(tmp_path, monkeypatch) -> None:
+    missing_path = tmp_path / "missing.csv"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(tmp_path / "api-missing-file.db"))
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(),
+        "POST",
+        "/imports/run",
+        json_body={"orders_path": str(missing_path)},
+    )
+
+    assert status == 400
+    detail = str(payload["detail"])
+    assert "missing" in detail.lower() or missing_path.name in detail

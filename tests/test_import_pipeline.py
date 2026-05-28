@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from trade_entity_graph.db.connection import get_connection
 from trade_entity_graph.importers.models import ImportErrorRecord, ImportInputs
@@ -317,3 +318,40 @@ def test_mapping_only_failures_populate_import_batch_error_summary(tmp_path, mon
     assert batch["error_rows"] == 1
     assert batch["error_summary"] is not None
     assert "Missing required field: order_id." in batch["error_summary"]
+
+
+def test_run_import_records_file_read_error_for_missing_file(tmp_path, monkeypatch) -> None:
+    missing_path = tmp_path / "missing_orders.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    with pytest.raises(FileNotFoundError):
+        run_import(ImportInputs(orders_path=missing_path), db_path=db_path)
+
+    with get_connection(db_path) as connection:
+        batch = connection.execute(
+            "SELECT success_rows, error_rows, warning_rows, error_summary FROM import_batch"
+        ).fetchone()
+        error_rows = connection.execute(
+            """
+            SELECT run_id, file_role, source_path, error_type, severity, message
+            FROM import_error
+            """
+        ).fetchall()
+
+    assert batch is not None
+    assert batch["success_rows"] == 0
+    assert batch["error_rows"] == 1
+    assert batch["warning_rows"] == 0
+    assert batch["error_summary"] is not None
+    assert str(missing_path) in batch["error_summary"] or "missing" in batch[
+        "error_summary"
+    ].lower()
+    assert len(error_rows) == 1
+    error = error_rows[0]
+    assert error["run_id"]
+    assert error["file_role"] == "orders"
+    assert str(missing_path) in error["source_path"]
+    assert error["error_type"] == "file_read_error"
+    assert error["severity"] == "blocking"
+    assert str(missing_path) in error["message"] or "missing" in error["message"].lower()
