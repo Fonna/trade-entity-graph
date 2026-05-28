@@ -62,6 +62,29 @@ def inspect_workbook(path: str | Path) -> dict[str, object]:
     return {"path": str(target), "name": target.name, "suffix": target.suffix, "sheets": sheets}
 
 
+def inspect_tabular_header(
+    path: str | Path, sheet_name: str | None = None
+) -> dict[str, object]:
+    """Return selected sheet/file header metadata without reading data rows."""
+
+    target = Path(path)
+    if not target.exists():
+        raise FileNotFoundError(target)
+
+    suffix = target.suffix.lower()
+    if suffix in EXCEL_SUFFIXES:
+        workbook = pd.ExcelFile(target)
+        selected_sheet = sheet_name or workbook.sheet_names[0]
+        frame = workbook.parse(sheet_name=selected_sheet, nrows=0)
+        return {"name": selected_sheet, "columns": [str(column) for column in frame.columns]}
+
+    if suffix in CSV_SUFFIXES:
+        frame = pd.read_csv(target, nrows=0)
+        return {"name": target.stem, "columns": [str(column) for column in frame.columns]}
+
+    raise ValueError(f"Unsupported import file suffix: {target.suffix}")
+
+
 def read_tabular_rows(path: str | Path, sheet_name: str | None = None) -> list[ImportSourceRow]:
     """Read an Excel sheet or CSV file into source rows."""
 

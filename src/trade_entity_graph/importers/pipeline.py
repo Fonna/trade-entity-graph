@@ -10,7 +10,10 @@ from trade_entity_graph.db.connection import get_connection, initialize_database
 from trade_entity_graph.importers.batch_loader import create_import_batch, finish_import_batch
 from trade_entity_graph.importers.entity_loader import load_entities
 from trade_entity_graph.importers.evidence_loader import load_order_evidence
-from trade_entity_graph.importers.excel_importer import inspect_workbook, read_tabular_rows
+from trade_entity_graph.importers.excel_importer import (
+    inspect_tabular_header,
+    read_tabular_rows,
+)
 from trade_entity_graph.importers.field_mapping import (
     resolve_rows_for_role,
     validate_required_headers,
@@ -194,11 +197,7 @@ def _read_rows_or_record_file_failure(
 def _validate_empty_source_headers(
     path: Path, *, role: str, run_id: str
 ) -> list[ImportErrorRecord]:
-    metadata = inspect_workbook(path)
-    sheets = metadata["sheets"]
-    if not sheets:
-        return []
-    sheet = sheets[0]
+    sheet = inspect_tabular_header(path)
     return validate_required_headers(
         list(sheet["columns"]),
         role=role,

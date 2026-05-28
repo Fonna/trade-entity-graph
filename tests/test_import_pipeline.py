@@ -555,6 +555,51 @@ def test_header_only_orders_missing_required_field_records_import_error(
     assert "Missing required field: order_id." in batch["error_summary"]
 
 
+def test_header_only_excel_orders_validate_selected_sheet_header_only(
+    tmp_path, monkeypatch
+) -> None:
+    orders_path = tmp_path / "orders.xlsx"
+    db_path = tmp_path / "trade_entity_graph.db"
+    parse_calls: list[tuple[str, int | None]] = []
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+    orders_path.write_bytes(b"stub workbook")
+
+    class FakeExcelFile:
+        sheet_names = ["EmptyFirst", "DataSecond"]
+
+        def __init__(self, target: Path) -> None:
+            assert target == orders_path
+
+        def parse(self, *, sheet_name: str, nrows: int | None = None) -> pd.DataFrame:
+            parse_calls.append((sheet_name, nrows))
+            if sheet_name != "EmptyFirst":
+                raise AssertionError("header validation parsed a non-selected sheet")
+            return pd.DataFrame(columns=["customer_name", "teu"])
+
+    monkeypatch.setattr(pd, "ExcelFile", FakeExcelFile)
+
+    result = run_import(
+        ImportInputs(orders_path=orders_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        error = connection.execute(
+            """
+            SELECT sheet_name, error_type, normalized_field
+            FROM import_error
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    assert error is not None
+    assert error["sheet_name"] == "EmptyFirst"
+    assert error["error_type"] == "missing_required_field"
+    assert error["normalized_field"] == "order_id"
+    assert parse_calls == [("EmptyFirst", None), ("EmptyFirst", 0)]
+
+
 def test_header_only_orders_with_required_field_imports_zero_rows(
     tmp_path, monkeypatch
 ) -> None:
