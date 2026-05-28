@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS import_batch (
     rule_version TEXT,
     success_rows INTEGER DEFAULT 0,
     error_rows INTEGER DEFAULT 0,
+    warning_rows INTEGER DEFAULT 0,
     error_summary TEXT
 );
 
@@ -24,6 +25,23 @@ CREATE TABLE IF NOT EXISTS import_source_file (
     file_size_bytes INTEGER NOT NULL,
     sha256 TEXT NOT NULL,
     archived_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS import_error (
+    error_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES import_batch(run_id),
+    source_file_id TEXT REFERENCES import_source_file(source_file_id),
+    file_role TEXT,
+    source_path TEXT,
+    sheet_name TEXT,
+    row_number INTEGER,
+    column_name TEXT,
+    normalized_field TEXT,
+    raw_value TEXT,
+    error_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS entity (
@@ -163,6 +181,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_entity_canonical_name ON entity(canonical_name);
 CREATE INDEX IF NOT EXISTS idx_entity_alias_name ON entity_alias(alias_name);
 CREATE INDEX IF NOT EXISTS idx_import_source_file_run ON import_source_file(run_id);
+CREATE INDEX IF NOT EXISTS idx_import_error_run ON import_error(run_id);
+CREATE INDEX IF NOT EXISTS idx_import_error_type ON import_error(error_type);
+CREATE INDEX IF NOT EXISTS idx_import_error_severity ON import_error(severity);
 CREATE INDEX IF NOT EXISTS idx_order_role_edge_from ON order_role_edge(from_entity_id);
 CREATE INDEX IF NOT EXISTS idx_order_role_edge_to ON order_role_edge(to_entity_id);
 CREATE INDEX IF NOT EXISTS idx_order_role_edge_role_pair ON order_role_edge(role_pair_type);

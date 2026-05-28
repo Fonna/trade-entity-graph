@@ -8,12 +8,15 @@ from pathlib import Path
 from trade_entity_graph.config import get_settings
 
 SCHEMA_COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
+    "import_batch": {
+        "warning_rows": "INTEGER DEFAULT 0",
+    },
     "order_evidence": {
         "customer_name": "TEXT",
         "shipper_name": "TEXT",
         "consignee_name": "TEXT",
         "notify_name": "TEXT",
-    }
+    },
 }
 
 

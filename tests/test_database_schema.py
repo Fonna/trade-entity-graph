@@ -10,6 +10,7 @@ EXPECTED_TABLES = {
     "entity",
     "entity_alias",
     "import_batch",
+    "import_error",
     "import_source_file",
     "order_evidence",
     "order_role_edge",
@@ -23,6 +24,9 @@ EXPECTED_INDEXES = {
     "idx_curated_relationship_status",
     "idx_entity_alias_name",
     "idx_entity_canonical_name",
+    "idx_import_error_run",
+    "idx_import_error_severity",
+    "idx_import_error_type",
     "idx_import_source_file_run",
     "idx_order_role_edge_from",
     "idx_order_role_edge_role_pair",
@@ -51,6 +55,21 @@ def test_initialize_database_creates_common_indexes(tmp_path) -> None:
 
     with get_connection(db_path) as connection:
         assert EXPECTED_INDEXES.issubset(_sqlite_objects(connection, "index"))
+
+
+def test_import_error_schema_has_traceability_columns(tmp_path) -> None:
+    db_path = initialize_database(tmp_path / "trade_entity_graph.db")
+
+    with get_connection(db_path) as connection:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(import_error)")
+        }
+
+    assert {
+        "error_id", "run_id", "source_file_id", "file_role", "source_path",
+        "sheet_name", "row_number", "column_name", "normalized_field", "raw_value",
+        "error_type", "severity", "message", "created_at",
+    }.issubset(columns)
 
 
 def test_get_connection_enables_foreign_keys(tmp_path) -> None:
