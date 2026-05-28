@@ -44,7 +44,10 @@ def test_write_import_errors_persists_traceability_fields(tmp_path) -> None:
     assert count == 1
     assert row["run_id"] == "RUN_ERR"
     assert row["file_role"] == "orders"
+    assert row["source_path"] == "orders.csv"
+    assert row["sheet_name"] == "orders"
     assert row["row_number"] == 3
+    assert row["column_name"] == "TEU"
     assert row["normalized_field"] == "teu"
     assert row["raw_value"] == "abc"
     assert row["error_type"] == "invalid_numeric_value"
