@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from trade_entity_graph.importers.field_mapping import get_value
-from trade_entity_graph.importers.models import ImportSourceRow
+from trade_entity_graph.importers.models import ImportErrorRecord, ImportSourceRow
 from trade_entity_graph.utils.ids import new_id
 from trade_entity_graph.utils.normalization import normalize_company_name
 
@@ -16,6 +16,7 @@ class EntityLoadResult:
     entity_count: int = 0
     alias_count: int = 0
     skipped_rows: list[str] = field(default_factory=list)
+    import_errors: list[ImportErrorRecord] = field(default_factory=list)
 
 
 def find_entity_id_by_name(connection: sqlite3.Connection, name: str | None) -> str | None:
@@ -86,10 +87,25 @@ def load_entities(
     result = EntityLoadResult()
     seen_entities: set[str] = set()
     for row in rows:
-        canonical_name = normalize_company_name(get_value(row.values, "canonical_name", ""))
+        raw_canonical_name = get_value(row.values, "canonical_name", "")
+        canonical_name = normalize_company_name(raw_canonical_name)
         if not canonical_name:
             result.skipped_rows.append(
                 f"{row.source_file}:{row.source_row}: missing canonical_name"
+            )
+            result.import_errors.append(
+                ImportErrorRecord(
+                    run_id=run_id,
+                    error_type="missing_required_value",
+                    severity="blocking",
+                    message="标准企业名称不能为空",
+                    file_role="entities",
+                    source_path=row.source_file,
+                    sheet_name=row.source_sheet,
+                    row_number=row.source_row,
+                    normalized_field="canonical_name",
+                    raw_value=raw_canonical_name,
+                )
             )
             continue
 

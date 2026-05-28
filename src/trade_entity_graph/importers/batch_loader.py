@@ -38,16 +38,17 @@ def finish_import_batch(
     *,
     success_rows: int,
     error_rows: int,
-    error_summary: str | None,
+    warning_rows: int = 0,
+    error_summary: str | None = None,
 ) -> None:
     """Update import row counts after loaders finish."""
 
     connection.execute(
         """
         UPDATE import_batch
-        SET success_rows = ?, error_rows = ?, error_summary = ?
+        SET success_rows = ?, error_rows = ?, warning_rows = ?, error_summary = ?
         WHERE run_id = ?
         """,
-        (success_rows, error_rows, error_summary, run_id),
+        (success_rows, error_rows, warning_rows, error_summary, run_id),
     )
     connection.commit()

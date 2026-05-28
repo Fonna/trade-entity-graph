@@ -114,3 +114,75 @@ def test_run_import_allows_entities_without_country_or_entity_type(tmp_path, mon
     assert row["canonical_name"] == "ACME TRADING"
     assert row["country"] is None
     assert row["entity_type"] is None
+
+
+
+def test_run_import_records_errors_and_keeps_valid_rows(tmp_path, monkeypatch) -> None:
+    entities_path = tmp_path / "entities.csv"
+    orders_path = tmp_path / "orders.csv"
+    relationships_path = tmp_path / "relationships.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "标准名": ["ACME TRADING", "BETA FACTORY", ""],
+            "原始名": ["Acme Trading Ltd", "Beta Factory Inc", "Missing Name Ltd"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(
+        {
+            "业务编号": ["SO-1", "SO-2", ""],
+            "Booking Customer": ["Acme Trading Ltd", "Acme Trading Ltd", "Acme Trading Ltd"],
+            "Shipper": ["Beta Factory Inc", "Beta Factory Inc", "Beta Factory Inc"],
+            "Consignee": ["Beta Factory Inc", "Beta Factory Inc", "Beta Factory Inc"],
+            "TEU": ["3.5", "not-a-number", "1.0"],
+        }
+    ).to_csv(orders_path, index=False)
+    pd.DataFrame(
+        {
+            "主体A": ["ACME TRADING", "UNKNOWN CO"],
+            "主体B": ["BETA FACTORY", "BETA FACTORY"],
+            "关系类型": ["trading_partner_candidate", "trading_partner_candidate"],
+        }
+    ).to_csv(relationships_path, index=False)
+
+    result = run_import(
+        ImportInputs(
+            entities_path=entities_path,
+            orders_path=orders_path,
+            relationships_path=relationships_path,
+            imported_by="tester",
+        ),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        evidence_count = connection.execute("SELECT COUNT(*) FROM order_evidence").fetchone()[0]
+        claim_count = connection.execute("SELECT COUNT(*) FROM relationship_claim").fetchone()[0]
+        errors = connection.execute(
+            """
+            SELECT error_type, severity
+            FROM import_error
+            WHERE run_id = ?
+            ORDER BY file_role, row_number, normalized_field
+            """,
+            (result.run_id,),
+        ).fetchall()
+        batch = connection.execute(
+            "SELECT success_rows, error_rows, warning_rows FROM import_batch WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()
+
+    assert evidence_count == 1
+    assert claim_count == 1
+    assert result.error_count == 4
+    assert result.warning_count == 0
+    assert batch["success_rows"] == 4
+    assert batch["error_rows"] == 4
+    assert [row["error_type"] for row in errors] == [
+        "missing_required_value",
+        "invalid_numeric_value",
+        "missing_required_value",
+        "unknown_entity_reference",
+    ]
