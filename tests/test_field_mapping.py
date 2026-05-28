@@ -1,3 +1,5 @@
+import pytest
+
 from trade_entity_graph.importers.field_mapping import resolve_rows_for_role
 from trade_entity_graph.importers.models import ImportSourceRow
 
@@ -63,3 +65,12 @@ def test_resolve_rows_for_role_records_duplicate_mapping_warning() -> None:
     assert resolved_rows[0].values["canonical_name"] == "ACME TRADING"
     assert errors[0].error_type == "field_mapping_error"
     assert errors[0].severity == "warning"
+
+
+def test_resolve_rows_for_role_rejects_unknown_role() -> None:
+    rows = [
+        ImportSourceRow(source_file="x.csv", source_sheet="x", source_row=2, values={})
+    ]
+
+    with pytest.raises(ValueError, match="Unsupported import file role: bad_role"):
+        resolve_rows_for_role(rows, role="bad_role", run_id="RUN_MAP")

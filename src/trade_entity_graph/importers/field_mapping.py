@@ -60,7 +60,14 @@ def resolve_rows_for_role(
 ) -> tuple[list[ImportSourceRow], list[ImportErrorRecord]]:
     """Resolve source-row column aliases into canonical field names for one import role."""
 
-    role_config = DEFAULT_FIELD_MAPPING["roles"][role]
+    role_mappings = DEFAULT_FIELD_MAPPING["roles"]
+    if role not in role_mappings:
+        supported_roles = ", ".join(sorted(role_mappings))
+        raise ValueError(
+            f"Unsupported import file role: {role}. Supported roles: {supported_roles}"
+        )
+
+    role_config = role_mappings[role]
     required_fields = set(role_config["required"])
     alias_lookup = _ROLE_ALIAS_LOOKUPS[role]
     resolved_rows: list[ImportSourceRow] = []
