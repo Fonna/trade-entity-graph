@@ -1,6 +1,9 @@
 import pytest
 
-from trade_entity_graph.importers.field_mapping import resolve_rows_for_role
+from trade_entity_graph.importers.field_mapping import (
+    resolve_rows_for_role,
+    validate_required_headers,
+)
 from trade_entity_graph.importers.models import ImportSourceRow
 
 
@@ -65,6 +68,36 @@ def test_resolve_rows_for_role_records_duplicate_mapping_warning() -> None:
     assert resolved_rows[0].values["canonical_name"] == "ACME TRADING"
     assert errors[0].error_type == "field_mapping_error"
     assert errors[0].severity == "warning"
+
+
+def test_validate_required_headers_records_missing_required_field() -> None:
+    errors = validate_required_headers(
+        ["customer_name", "teu"],
+        role="orders",
+        run_id="RUN_MAP",
+        source_path="orders.csv",
+        sheet_name="orders",
+    )
+
+    assert len(errors) == 1
+    assert errors[0].error_type == "missing_required_field"
+    assert errors[0].severity == "blocking"
+    assert errors[0].source_path == "orders.csv"
+    assert errors[0].sheet_name == "orders"
+    assert errors[0].row_number is None
+    assert errors[0].normalized_field == "order_id"
+
+
+def test_validate_required_headers_accepts_required_alias() -> None:
+    errors = validate_required_headers(
+        ["so_no", "customer_name", "teu"],
+        role="orders",
+        run_id="RUN_MAP",
+        source_path="orders.csv",
+        sheet_name="orders",
+    )
+
+    assert errors == []
 
 
 def test_resolve_rows_for_role_rejects_unknown_role() -> None:

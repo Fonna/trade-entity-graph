@@ -10,8 +10,11 @@ from trade_entity_graph.db.connection import get_connection, initialize_database
 from trade_entity_graph.importers.batch_loader import create_import_batch, finish_import_batch
 from trade_entity_graph.importers.entity_loader import load_entities
 from trade_entity_graph.importers.evidence_loader import load_order_evidence
-from trade_entity_graph.importers.excel_importer import read_tabular_rows
-from trade_entity_graph.importers.field_mapping import resolve_rows_for_role
+from trade_entity_graph.importers.excel_importer import inspect_workbook, read_tabular_rows
+from trade_entity_graph.importers.field_mapping import (
+    resolve_rows_for_role,
+    validate_required_headers,
+)
 from trade_entity_graph.importers.import_error_loader import write_import_errors
 from trade_entity_graph.importers.models import ImportErrorRecord, ImportInputs, ImportRunResult
 from trade_entity_graph.importers.relationship_loader import load_relationship_claims
@@ -188,6 +191,23 @@ def _read_rows_or_record_file_failure(
         raise
 
 
+def _validate_empty_source_headers(
+    path: Path, *, role: str, run_id: str
+) -> list[ImportErrorRecord]:
+    metadata = inspect_workbook(path)
+    sheets = metadata["sheets"]
+    if not sheets:
+        return []
+    sheet = sheets[0]
+    return validate_required_headers(
+        list(sheet["columns"]),
+        role=role,
+        run_id=run_id,
+        source_path=path.name,
+        sheet_name=str(sheet["name"]),
+    )
+
+
 def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> ImportRunResult:
     """Run the M2 import pipeline for the provided input files."""
 
@@ -233,18 +253,25 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
         success_rows = 0
 
         if inputs.entities_path is not None:
-            entity_rows, mapping_errors = resolve_rows_for_role(
-                _read_rows_or_record_file_failure(
-                    connection,
-                    run_id=run_id,
-                    role="entities",
-                    path=Path(inputs.entities_path),
-                    source_file_id=source_file_ids_by_role.get("entities"),
-                    success_rows=success_rows,
-                    import_errors=_enrich_error_source_file_ids(
-                        import_errors, source_file_ids_by_role
-                    ),
+            raw_rows = _read_rows_or_record_file_failure(
+                connection,
+                run_id=run_id,
+                role="entities",
+                path=Path(inputs.entities_path),
+                source_file_id=source_file_ids_by_role.get("entities"),
+                success_rows=success_rows,
+                import_errors=_enrich_error_source_file_ids(
+                    import_errors, source_file_ids_by_role
                 ),
+            )
+            if not raw_rows:
+                import_errors.extend(
+                    _validate_empty_source_headers(
+                        Path(inputs.entities_path), role="entities", run_id=run_id
+                    )
+                )
+            entity_rows, mapping_errors = resolve_rows_for_role(
+                raw_rows,
                 role="entities",
                 run_id=run_id,
             )
@@ -262,18 +289,25 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             success_rows += entity_result.success_rows
 
         if inputs.orders_path is not None:
-            order_rows, mapping_errors = resolve_rows_for_role(
-                _read_rows_or_record_file_failure(
-                    connection,
-                    run_id=run_id,
-                    role="orders",
-                    path=Path(inputs.orders_path),
-                    source_file_id=source_file_ids_by_role.get("orders"),
-                    success_rows=success_rows,
-                    import_errors=_enrich_error_source_file_ids(
-                        import_errors, source_file_ids_by_role
-                    ),
+            raw_rows = _read_rows_or_record_file_failure(
+                connection,
+                run_id=run_id,
+                role="orders",
+                path=Path(inputs.orders_path),
+                source_file_id=source_file_ids_by_role.get("orders"),
+                success_rows=success_rows,
+                import_errors=_enrich_error_source_file_ids(
+                    import_errors, source_file_ids_by_role
                 ),
+            )
+            if not raw_rows:
+                import_errors.extend(
+                    _validate_empty_source_headers(
+                        Path(inputs.orders_path), role="orders", run_id=run_id
+                    )
+                )
+            order_rows, mapping_errors = resolve_rows_for_role(
+                raw_rows,
                 role="orders",
                 run_id=run_id,
             )
@@ -289,18 +323,27 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             success_rows += evidence_result.success_rows
 
         if inputs.relationships_path is not None:
-            relationship_rows, mapping_errors = resolve_rows_for_role(
-                _read_rows_or_record_file_failure(
-                    connection,
-                    run_id=run_id,
-                    role="relationships",
-                    path=Path(inputs.relationships_path),
-                    source_file_id=source_file_ids_by_role.get("relationships"),
-                    success_rows=success_rows,
-                    import_errors=_enrich_error_source_file_ids(
-                        import_errors, source_file_ids_by_role
-                    ),
+            raw_rows = _read_rows_or_record_file_failure(
+                connection,
+                run_id=run_id,
+                role="relationships",
+                path=Path(inputs.relationships_path),
+                source_file_id=source_file_ids_by_role.get("relationships"),
+                success_rows=success_rows,
+                import_errors=_enrich_error_source_file_ids(
+                    import_errors, source_file_ids_by_role
                 ),
+            )
+            if not raw_rows:
+                import_errors.extend(
+                    _validate_empty_source_headers(
+                        Path(inputs.relationships_path),
+                        role="relationships",
+                        run_id=run_id,
+                    )
+                )
+            relationship_rows, mapping_errors = resolve_rows_for_role(
+                raw_rows,
                 role="relationships",
                 run_id=run_id,
             )

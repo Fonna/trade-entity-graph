@@ -506,6 +506,93 @@ def test_mapping_only_failures_populate_import_batch_error_summary(tmp_path, mon
     assert "Missing required field: order_id." in batch["error_summary"]
 
 
+def test_header_only_orders_missing_required_field_records_import_error(
+    tmp_path, monkeypatch
+) -> None:
+    orders_path = tmp_path / "orders.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(columns=["customer_name", "teu"]).to_csv(orders_path, index=False)
+
+    result = run_import(
+        ImportInputs(orders_path=orders_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        error = connection.execute(
+            """
+            SELECT file_role, source_path, sheet_name, row_number, error_type, severity,
+                   normalized_field, message
+            FROM import_error
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+        batch = connection.execute(
+            """
+            SELECT success_rows, error_rows, warning_rows, error_summary
+            FROM import_batch
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    assert result.error_count == 1
+    assert error is not None
+    assert error["file_role"] == "orders"
+    assert error["source_path"] == orders_path.name
+    assert error["sheet_name"] == orders_path.stem
+    assert error["row_number"] is None
+    assert error["error_type"] == "missing_required_field"
+    assert error["severity"] == "blocking"
+    assert error["normalized_field"] == "order_id"
+    assert "Missing required field: order_id." in error["message"]
+    assert batch["success_rows"] == 0
+    assert batch["error_rows"] == 1
+    assert batch["warning_rows"] == 0
+    assert "Missing required field: order_id." in batch["error_summary"]
+
+
+def test_header_only_orders_with_required_field_imports_zero_rows(
+    tmp_path, monkeypatch
+) -> None:
+    orders_path = tmp_path / "orders.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(columns=["order_id", "customer_name", "teu"]).to_csv(
+        orders_path, index=False
+    )
+
+    result = run_import(
+        ImportInputs(orders_path=orders_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        import_error_count = connection.execute(
+            "SELECT COUNT(*) FROM import_error WHERE run_id = ?",
+            (result.run_id,),
+        ).fetchone()[0]
+        batch = connection.execute(
+            """
+            SELECT success_rows, error_rows, warning_rows, error_summary
+            FROM import_batch
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    assert import_error_count == 0
+    assert result.error_count == 0
+    assert batch["success_rows"] == 0
+    assert batch["error_rows"] == 0
+    assert batch["warning_rows"] == 0
+    assert batch["error_summary"] is None
+
+
 def test_run_import_records_file_read_error_for_missing_file(tmp_path, monkeypatch) -> None:
     missing_path = tmp_path / "missing_orders.csv"
     db_path = tmp_path / "trade_entity_graph.db"

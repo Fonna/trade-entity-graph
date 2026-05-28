@@ -55,6 +55,46 @@ def get_value(row: dict[str, Any], field_name: str, default: Any = None) -> Any:
     return default
 
 
+def validate_required_headers(
+    columns: list[str],
+    *,
+    role: str,
+    run_id: str,
+    source_path: str | None,
+    sheet_name: str | None,
+) -> list[ImportErrorRecord]:
+    """Validate required field aliases when a source has headers but no data rows."""
+
+    role_mappings = DEFAULT_FIELD_MAPPING["roles"]
+    if role not in role_mappings:
+        supported_roles = ", ".join(sorted(role_mappings))
+        raise ValueError(
+            f"Unsupported import file role: {role}. Supported roles: {supported_roles}"
+        )
+
+    alias_lookup = _ROLE_ALIAS_LOOKUPS[role]
+    matched_fields = {
+        field_name
+        for column_name in columns
+        if (field_name := alias_lookup.get(normalize_key(column_name))) is not None
+    }
+    return [
+        ImportErrorRecord(
+            run_id=run_id,
+            error_type="missing_required_field",
+            severity="blocking",
+            message=f"Missing required field: {required_field}.",
+            file_role=role,
+            source_path=source_path,
+            sheet_name=sheet_name,
+            row_number=None,
+            normalized_field=required_field,
+        )
+        for required_field in role_mappings[role]["required"]
+        if required_field not in matched_fields
+    ]
+
+
 def resolve_rows_for_role(
     rows: list[ImportSourceRow], *, role: str, run_id: str
 ) -> tuple[list[ImportSourceRow], list[ImportErrorRecord]]:
