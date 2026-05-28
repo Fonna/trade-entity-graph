@@ -10,6 +10,12 @@ from pydantic import BaseModel
 from trade_entity_graph.importers.models import ImportInputs
 from trade_entity_graph.importers.pipeline import run_import
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
+from trade_entity_graph.services.import_quality_service import (
+    get_import_batch_detail,
+    get_import_quality_report,
+    list_import_batches,
+    list_import_errors,
+)
 from trade_entity_graph.services.relationship_service import (
     aggregate_relationship_claims,
     generate_order_role_edges,
@@ -25,6 +31,42 @@ class ImportRunRequest(BaseModel):
     imported_by: str = "local_user"
     generate_edges: bool = True
     aggregate_claims: bool = True
+
+
+@router.get("")
+def list_import_batches_endpoint(
+    limit: int = 20,
+    offset: int = 0,
+    status: str | None = None,
+) -> dict[str, object]:
+    return list_import_batches(limit=limit, offset=offset, status=status)
+
+
+@router.get("/{run_id}")
+def get_import_batch_endpoint(run_id: str) -> dict[str, object]:
+    return get_import_batch_detail(run_id)
+
+
+@router.get("/{run_id}/errors")
+def list_import_errors_endpoint(
+    run_id: str,
+    severity: str | None = None,
+    error_type: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> dict[str, object]:
+    return list_import_errors(
+        run_id,
+        severity=severity,
+        error_type=error_type,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/{run_id}/quality-report")
+def get_import_quality_report_endpoint(run_id: str) -> dict[str, object]:
+    return get_import_quality_report(run_id)
 
 
 @router.post("/run")
@@ -59,4 +101,8 @@ def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
         "history_reuse": history_reuse,
         "skipped_rows": result.skipped_rows,
         "archived_files": result.archived_files,
+        "error_count": getattr(result, "error_count", 0),
+        "warning_count": getattr(result, "warning_count", 0),
+        "import_errors": getattr(result, "import_errors", []),
+        "quality_summary": getattr(result, "quality_summary", {}),
     }

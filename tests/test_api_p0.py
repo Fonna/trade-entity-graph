@@ -1116,3 +1116,119 @@ def test_import_endpoint_default_preserves_imported_claims_without_edges(
         "unchanged": 0,
     }
     assert calls == ["RUN_IMPORTED_CLAIMS_DEFAULT"]
+
+
+def test_imports_api_lists_batches_with_quality_summary(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-import-list.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (
+                run_id, source_file, imported_by, success_rows, error_rows, warning_rows
+            )
+            VALUES ('RUN_API_IMPORTS', 'orders.csv', 'tester', 1, 1, 0)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO import_error (
+                error_id, run_id, file_role, source_path, sheet_name, row_number,
+                normalized_field, raw_value, error_type, severity, message
+            )
+            VALUES (
+                'IER_API_IMPORTS', 'RUN_API_IMPORTS', 'orders', 'orders.csv',
+                'orders', 3, 'teu', 'abc', 'invalid_numeric_value', 'blocking',
+                'TEU 必须是数字'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(create_app(), "GET", "/imports")
+
+    assert status == 200
+    assert payload["summary"]["total_count"] == 1
+    assert payload["items"][0]["run_id"] == "RUN_API_IMPORTS"
+    assert payload["items"][0]["blocking_error_count"] == 1
+
+
+def test_imports_api_returns_batch_errors(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "api-import-errors.db"
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    initialize_database(db_path)
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_API_ERRORS', 'orders.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO import_error (
+                error_id, run_id, file_role, source_path, sheet_name, row_number,
+                normalized_field, raw_value, error_type, severity, message
+            )
+            VALUES (
+                'IER_API_ERRORS', 'RUN_API_ERRORS', 'orders', 'orders.csv',
+                'orders', 3, 'teu', 'abc', 'invalid_numeric_value', 'blocking',
+                'TEU 必须是数字'
+            )
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(),
+        "GET",
+        "/imports/RUN_API_ERRORS/errors",
+        query={"severity": "blocking"},
+    )
+
+    assert status == 200
+    assert payload["summary"]["total_count"] == 1
+    assert payload["items"][0]["error_type"] == "invalid_numeric_value"
+
+
+def test_import_run_endpoint_includes_quality_summary(monkeypatch) -> None:
+    class ImportResult:
+        run_id = "RUN_IMPORT_QUALITY"
+        entity_count = 1
+        alias_count = 1
+        evidence_count = 1
+        claim_count = 0
+        skipped_rows = ["orders.csv:3: invalid teu"]
+        archived_files = []
+        import_errors = []
+        error_count = 1
+        warning_count = 0
+        quality_summary = {
+            "blocking_error_count": 1,
+            "warning_count": 0,
+            "error_count_by_type": {"invalid_numeric_value": 1},
+        }
+
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.run_import",
+        lambda inputs: ImportResult(),
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.generate_order_role_edges",
+        lambda *, run_id: {"edge_count": 0},
+    )
+
+    payload = run_import_endpoint(ImportRunRequest(orders_path="orders.csv"))
+
+    assert payload["quality_summary"] == {
+        "blocking_error_count": 1,
+        "warning_count": 0,
+        "error_count_by_type": {"invalid_numeric_value": 1},
+    }
+    assert payload["error_count"] == 1
+    assert payload["warning_count"] == 0
