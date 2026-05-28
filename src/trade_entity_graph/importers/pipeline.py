@@ -134,29 +134,28 @@ def _record_file_read_failure(
     role: str | None,
     path: Path | None,
     source_file_id: str | None = None,
+    success_rows: int = 0,
+    import_errors: list[ImportErrorRecord] | None = None,
 ) -> None:
     message = _file_failure_message(exc, role=role, path=path)
-    write_import_errors(
-        connection,
-        [
-            ImportErrorRecord(
-                run_id=run_id,
-                source_file_id=source_file_id,
-                file_role=role,
-                source_path=str(path) if path is not None else None,
-                error_type="file_read_error",
-                severity="blocking",
-                message=message,
-            )
-        ],
+    failure_error = ImportErrorRecord(
+        run_id=run_id,
+        source_file_id=source_file_id,
+        file_role=role,
+        source_path=str(path) if path is not None else None,
+        error_type="file_read_error",
+        severity="blocking",
+        message=message,
     )
+    persisted_errors = [*(import_errors or []), failure_error]
+    write_import_errors(connection, persisted_errors)
     finish_import_batch(
         connection,
         run_id,
-        success_rows=0,
-        error_rows=1,
-        warning_rows=0,
-        error_summary=message,
+        success_rows=success_rows,
+        error_rows=_error_row_count(persisted_errors, "blocking"),
+        warning_rows=_error_row_count(persisted_errors, "warning"),
+        error_summary=_error_summary([], persisted_errors),
     )
 
 
@@ -167,6 +166,8 @@ def _read_rows_or_record_file_failure(
     role: str,
     path: Path,
     source_file_id: str | None,
+    success_rows: int = 0,
+    import_errors: list[ImportErrorRecord] | None = None,
 ):
     try:
         return read_tabular_rows(path)
@@ -179,6 +180,8 @@ def _read_rows_or_record_file_failure(
                 role=role,
                 path=path,
                 source_file_id=source_file_id,
+                success_rows=success_rows,
+                import_errors=import_errors,
             )
         except Exception as persistence_exc:
             exc.add_note(f"Failed to persist import file failure: {persistence_exc}")
@@ -237,6 +240,10 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
                     role="entities",
                     path=Path(inputs.entities_path),
                     source_file_id=source_file_ids_by_role.get("entities"),
+                    success_rows=success_rows,
+                    import_errors=_enrich_error_source_file_ids(
+                        import_errors, source_file_ids_by_role
+                    ),
                 ),
                 role="entities",
                 run_id=run_id,
@@ -262,6 +269,10 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
                     role="orders",
                     path=Path(inputs.orders_path),
                     source_file_id=source_file_ids_by_role.get("orders"),
+                    success_rows=success_rows,
+                    import_errors=_enrich_error_source_file_ids(
+                        import_errors, source_file_ids_by_role
+                    ),
                 ),
                 role="orders",
                 run_id=run_id,
@@ -285,6 +296,10 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
                     role="relationships",
                     path=Path(inputs.relationships_path),
                     source_file_id=source_file_ids_by_role.get("relationships"),
+                    success_rows=success_rows,
+                    import_errors=_enrich_error_source_file_ids(
+                        import_errors, source_file_ids_by_role
+                    ),
                 ),
                 role="relationships",
                 run_id=run_id,

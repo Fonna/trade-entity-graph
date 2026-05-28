@@ -355,3 +355,47 @@ def test_run_import_records_file_read_error_for_missing_file(tmp_path, monkeypat
     assert error["error_type"] == "file_read_error"
     assert error["severity"] == "blocking"
     assert str(missing_path) in error["message"] or "missing" in error["message"].lower()
+
+
+def test_run_import_preserves_success_rows_when_later_file_read_fails(
+    tmp_path, monkeypatch
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    orders_path = tmp_path / "orders.txt"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING"],
+            "original_name": ["Acme Trading Ltd"],
+        }
+    ).to_csv(entities_path, index=False)
+    orders_path.write_text("unsupported file content", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        run_import(
+            ImportInputs(entities_path=entities_path, orders_path=orders_path),
+            db_path=db_path,
+        )
+
+    with get_connection(db_path) as connection:
+        entity_count = connection.execute("SELECT COUNT(*) FROM entity").fetchone()[0]
+        batch = connection.execute(
+            "SELECT success_rows, error_rows, warning_rows FROM import_batch"
+        ).fetchone()
+        errors = connection.execute(
+            """
+            SELECT file_role, error_type, severity
+            FROM import_error
+            """
+        ).fetchall()
+
+    assert entity_count == 1
+    assert batch["success_rows"] == 1
+    assert batch["error_rows"] == 1
+    assert batch["warning_rows"] == 0
+    assert len(errors) == 1
+    assert errors[0]["file_role"] == "orders"
+    assert errors[0]["error_type"] == "file_read_error"
+    assert errors[0]["severity"] == "blocking"
