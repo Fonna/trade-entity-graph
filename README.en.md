@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## Quick Start
 
-The repository has completed the M0/M1 baseline and now includes the M2-M8 P0 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop graph query, FastAPI endpoints, Chinese Streamlit workbench, export support, and demo acceptance data.
+The repository has completed the M0/M1 baseline and now includes the M2-M9 P0/P1 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop graph query, FastAPI endpoints, Chinese Streamlit workbench, export support, demo acceptance data, and the M9 real-data import QA loop with configurable field mapping, row-level import errors, import batch queries, quality reports, and import-error CSV export.
 
 All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
 
@@ -105,6 +105,12 @@ uv run pytest
 ```
 
 During import, the system copies original Excel/CSV files to `data/raw/imports/<run_id>/` and records each file role, original path, archived path, file size, and SHA256 in the SQLite `import_source_file` table.
+
+### M9 Real-Data Import QA Loop
+
+M9 targets dry runs with real Excel/CSV files. The default field mapping recognizes common Chinese and English aliases and can be configured for source-specific column names. Import validation keeps valid rows while writing missing fields, blank required values, TEU format errors, unknown entity references, and invalid relationship pairs to `import_error`.
+
+Import batches and quality results are available through `GET /imports`, `GET /imports/{run_id}`, `GET /imports/{run_id}/errors`, and `GET /imports/{run_id}/quality-report`. The Streamlit data import page shows recent batches, quality summaries, row-level errors, and import-error CSV export.
 
 ## Data Flow
 
@@ -156,14 +162,14 @@ flowchart TD
 
 ## Current Development Status
 
-As of 2026-05-28, the current branch includes the M2-M8 P0 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, and demo acceptance data. Latest verification:
+As of 2026-05-28, the current branch includes the M2-M9 P0/P1 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, demo acceptance data, and the M9 real-data import QA loop with configurable field mapping, row-level import errors, import batch queries, quality reports, and import-error CSV export. Latest verification:
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-Result: `101 passed`, ruff `All checks passed!`.
+Result: `130 passed`, ruff `All checks passed!`.
 
 ## Recommended Development Order
 
@@ -176,6 +182,7 @@ Result: `101 passed`, ruff `All checks passed!`.
 7. M6: FastAPI endpoints for search, graph, details, reviews, the global review queue, and exports.
 8. M7: Streamlit MVP pages and the review queue workbench.
 9. M8: Review persistence, audit logs, acceptance demo.
+10. M9: Real-data dry runs, import quality reports, and import-error workflow.
 
 ## Remote Repository
 

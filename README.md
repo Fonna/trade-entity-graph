@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## 快速开始
 
-当前仓库已完成 M0/M1 基线，并具备 M2-M8 P0 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳图谱查询、FastAPI 接口、中文 Streamlit 工作台、导出能力和演示验收数据包。
+当前仓库已完成 M0/M1 基线，并具备 M2-M9 P0/P1 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳图谱查询、FastAPI 接口、中文 Streamlit 工作台、导出能力、演示验收数据包，以及 M9 真实数据试运行与导入质量闭环，包括字段映射配置、行级导入异常记录、导入批次查询、质量报告和异常 CSV 导出。
 
 本项目所有 Python 环境、依赖安装和命令运行统一使用 `uv`，避免污染全局 Python 环境。
 
@@ -105,6 +105,12 @@ uv run pytest
 ```
 
 导入时，系统会复制原始 Excel/CSV 文件到 `data/raw/imports/<run_id>/`，并在 SQLite 表 `import_source_file` 中记录文件角色、原始路径、归档路径、文件大小和 SHA256。
+
+### M9 真实数据试运行与导入质量闭环
+
+M9 面向真实 Excel/CSV 试运行：默认字段映射可识别常见中文/英文别名，支持通过配置适配不同来源文件。导入过程会保留有效行，并将字段缺失、必填值为空、TEU 格式错误、未知企业引用、无效关系配对等问题写入 `import_error`，便于追溯和复核。
+
+导入批次和质量结果可通过 API 查询：`GET /imports`、`GET /imports/{run_id}`、`GET /imports/{run_id}/errors`、`GET /imports/{run_id}/quality-report`。Streamlit 数据导入页展示最近批次、质量摘要、异常明细，并支持导出异常 CSV。
 
 ## 数据流
 
@@ -156,14 +162,14 @@ flowchart TD
 
 ## 当前开发状态
 
-截至 2026-05-28，当前分支已包含 M2-M8 P0 闭环、原始文件归档能力、历史关系复用、全局待审核队列、中文 Streamlit 工作台和演示验收数据包。最近一次验证：
+截至 2026-05-28，当前分支已包含 M2-M9 P0/P1 闭环、原始文件归档能力、历史关系复用、全局待审核队列、中文 Streamlit 工作台、演示验收数据包，以及 M9 真实数据试运行与导入质量闭环：字段映射配置、行级导入异常记录、导入批次查询、质量报告和异常 CSV 导出。最近一次验证：
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-验证结果：`101 passed`，ruff `All checks passed!`。
+验证结果：`130 passed`，ruff `All checks passed!`。
 
 ## 推荐开发顺序
 
@@ -176,6 +182,7 @@ uv --cache-dir .uv-cache run ruff check .
 7. M6：FastAPI 搜索、图谱、详情、审核、全局待审核队列和导出接口。
 8. M7：Streamlit MVP 页面与待审核队列工作台。
 9. M8：人工审核写回、审计和验收演示。
+10. M9：真实数据试运行、导入质量报告和异常闭环。
 
 ## 远程仓库
 
