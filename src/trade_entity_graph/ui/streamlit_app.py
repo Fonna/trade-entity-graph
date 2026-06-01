@@ -63,6 +63,12 @@ RELATION_TYPE_OPTIONS: tuple[str, ...] = (
     "rejected_relation",
 )
 RELATION_TYPE_LABELS: dict[str, str] = {
+    "customer_to_shipper": "客户到发货人",
+    "customer_to_consignee": "客户到收货人",
+    "customer_to_notify": "客户到通知人",
+    "shipper_to_consignee": "发货人到收货人",
+    "shipper_to_notify": "发货人到通知人",
+    "consignee_to_notify": "收货人到通知人",
     "trading_partner": "普通贸易伙伴",
     "same_group": "同集团",
     "subsidiary": "子公司或海外公司",
@@ -98,9 +104,13 @@ TABLE_COLUMN_LABELS: dict[str, str] = {
     "source_label": "起点企业",
     "target_label": "终点企业",
     "edge_type": "边类型",
+    "edge_count": "边记录数",
     "record_type": "记录类型",
     "relation_type": "关系类型",
+    "relation_type_count": "关系类型数",
     "relation_status": "关系状态",
+    "entity_pair_count": "企业对数",
+    "entity_pairs": "企业对明细",
     "candidate_relation_type": "候选关系类型",
     "confidence_level": "置信等级",
     "confidence_score": "置信分",
@@ -802,6 +812,46 @@ def graph_summary_counts(graph: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
     )
 
 
+def graph_relation_type_summary(graph: dict[str, Any]) -> tuple[int, list[dict[str, Any]]]:
+    """Group visible graph edges by record type and relation type."""
+
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for edge in graph.get("edges") or []:
+        if not isinstance(edge, dict):
+            continue
+        record_type = str(edge.get("record_type") or edge.get("edge_type") or "-")
+        relation_type = str(edge.get("relation_type") or edge.get("label") or "-")
+        source_label = _edge_endpoint_label(edge, "source_label", "source")
+        target_label = _edge_endpoint_label(edge, "target_label", "target")
+        group = grouped.setdefault(
+            (record_type, relation_type),
+            {
+                "record_type": record_type,
+                "relation_type": relation_type,
+                "edge_count": 0,
+                "_entity_pairs": set(),
+            },
+        )
+        group["edge_count"] += 1
+        group["_entity_pairs"].add(f"{source_label} -> {target_label}")
+
+    rows = []
+    for record_type, relation_type in sorted(grouped):
+        group = grouped[(record_type, relation_type)]
+        entity_pairs = sorted(group["_entity_pairs"])
+        rows.append(
+            {
+                "record_type": group["record_type"],
+                "relation_type": group["relation_type"],
+                "edge_count": group["edge_count"],
+                "entity_pair_count": len(entity_pairs),
+                "entity_pairs": "; ".join(entity_pairs),
+            }
+        )
+
+    return len(rows), rows
+
+
 def path_entity_label(path_item: dict[str, Any], edge: dict[str, Any], endpoint: str) -> str:
     """Return the displayed entity label in the actual path traversal direction."""
 
@@ -1028,11 +1078,13 @@ def render_graph_tab() -> None:
     node_count, edge_count, candidate_edge_count, curated_edge_count = graph_summary_counts(
         graph
     )
-    metric_cols = st.columns(4)
+    relation_type_count, relation_type_rows = graph_relation_type_summary(graph)
+    metric_cols = st.columns(5)
     metric_cols[0].metric("节点数", node_count)
     metric_cols[1].metric("边数", edge_count)
-    metric_cols[2].metric("待审核候选", candidate_edge_count)
-    metric_cols[3].metric("最终关系", curated_edge_count)
+    metric_cols[2].metric("关系类型数", relation_type_count)
+    metric_cols[3].metric("待审核候选", candidate_edge_count)
+    metric_cols[4].metric("最终关系", curated_edge_count)
 
     components.html(render_graph_svg(graph), height=620, scrolling=True)
 
@@ -1111,6 +1163,12 @@ def render_graph_tab() -> None:
                 st.dataframe(path_rows)
             else:
                 st.info("\u672a\u627e\u5230\u8def\u5f84 / No path found")
+
+    with st.expander("关系类型明细"):
+        if relation_type_rows:
+            show_table(relation_type_rows)
+        else:
+            st.info("当前图谱暂无关系类型明细。")
 
     with st.expander("节点与边数据"):
         show_table(nodes)

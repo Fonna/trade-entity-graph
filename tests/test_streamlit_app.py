@@ -249,8 +249,77 @@ def test_graph_summary_counts_prefers_summary_values() -> None:
     assert streamlit_app.graph_summary_counts(graph) == (10, 20, 30, 40)
 
 
+def test_graph_relation_type_summary_deduplicates_by_record_and_relation_type() -> None:
+    graph = {
+        "edges": [
+            {
+                "record_type": "order_role_edge",
+                "relation_type": "customer_to_shipper",
+                "source_label": "ACME",
+                "target_label": "BETA",
+            },
+            {
+                "record_type": "order_role_edge",
+                "relation_type": "customer_to_shipper",
+                "source_label": "ACME",
+                "target_label": "BETA",
+            },
+            {
+                "record_type": "order_role_edge",
+                "relation_type": "customer_to_consignee",
+                "source_label": "ACME",
+                "target_label": "OMEGA",
+            },
+            {
+                "record_type": "relationship_claim",
+                "relation_type": "trading_partner_candidate",
+                "source_label": "ACME",
+                "target_label": "BETA",
+            },
+            {
+                "record_type": "relationship_claim",
+                "relation_type": "trading_partner_candidate",
+                "source_label": "ACME",
+                "target_label": "OMEGA",
+            },
+        ]
+    }
+
+    count, rows = streamlit_app.graph_relation_type_summary(graph)
+
+    assert count == 3
+    assert rows == [
+        {
+            "record_type": "order_role_edge",
+            "relation_type": "customer_to_consignee",
+            "edge_count": 1,
+            "entity_pair_count": 1,
+            "entity_pairs": "ACME -> OMEGA",
+        },
+        {
+            "record_type": "order_role_edge",
+            "relation_type": "customer_to_shipper",
+            "edge_count": 2,
+            "entity_pair_count": 1,
+            "entity_pairs": "ACME -> BETA",
+        },
+        {
+            "record_type": "relationship_claim",
+            "relation_type": "trading_partner_candidate",
+            "edge_count": 2,
+            "entity_pair_count": 2,
+            "entity_pairs": "ACME -> BETA; ACME -> OMEGA",
+        },
+    ]
+
+
 class GraphFakeColumn:
-    def metric(self, *_args, **_kwargs) -> None:
+    def __init__(self, owner=None) -> None:
+        self.owner = owner
+
+    def metric(self, label, value, *_args, **_kwargs) -> None:
+        if self.owner is not None:
+            self.owner.metrics.append((label, value))
         return None
 
 
@@ -282,6 +351,7 @@ class GraphFakeStreamlit:
         self.infos: list[str] = []
         self.errors: list[str] = []
         self.button_calls: list[tuple[str, dict]] = []
+        self.metrics: list[tuple[str, object]] = []
         self.text_input_calls = 0
         self.number_input_calls = 0
 
@@ -302,7 +372,7 @@ class GraphFakeStreamlit:
         return response
 
     def columns(self, count: int):
-        return [GraphFakeColumn() for _ in range(count)]
+        return [GraphFakeColumn(self) for _ in range(count)]
 
     def markdown(self, *_args, **_kwargs) -> None:
         return None
@@ -348,6 +418,53 @@ def test_graph_tab_requests_depth_two_graph(monkeypatch) -> None:
     streamlit_app.render_graph_tab()
 
     assert calls == [("ENT_A", {"include_rejected": False, "depth": 2, "max_nodes": 25})]
+
+
+def test_graph_tab_renders_relation_type_metric_and_detail(monkeypatch) -> None:
+    fake_st = GraphFakeStreamlit(center_entity_id="ENT_A")
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app.components, "html", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_ego_graph",
+        lambda *_args, **_kwargs: {
+            "nodes": [{"id": "ENT_A", "label": "ACME"}],
+            "edges": [
+                {
+                    "record_type": "order_role_edge",
+                    "edge_type": "order_role_edge",
+                    "relation_type": "customer_to_shipper",
+                    "source_label": "ACME",
+                    "target_label": "BETA",
+                },
+                {
+                    "record_type": "order_role_edge",
+                    "edge_type": "order_role_edge",
+                    "relation_type": "customer_to_shipper",
+                    "source_label": "ACME",
+                    "target_label": "BETA",
+                },
+                {
+                    "record_type": "order_role_edge",
+                    "edge_type": "order_role_edge",
+                    "relation_type": "customer_to_consignee",
+                    "source_label": "ACME",
+                    "target_label": "OMEGA",
+                },
+            ],
+            "summary": {"node_count": 1, "edge_count": 3},
+        },
+    )
+
+    streamlit_app.render_graph_tab()
+
+    assert ("关系类型数", 2) in fake_st.metrics
+    relation_summary = fake_st.frames[0]
+    assert [row["关系类型"] for row in relation_summary] == [
+        "客户到收货人",
+        "客户到发货人",
+    ]
+    assert [row["边记录数"] for row in relation_summary] == [1, 2]
 
 
 def test_graph_tab_handoff_button_has_unique_key(monkeypatch) -> None:
