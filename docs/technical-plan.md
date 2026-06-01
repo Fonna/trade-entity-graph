@@ -32,7 +32,7 @@ Excel/CSV 输入
 | --- | --- | --- |
 | 配置 | `src/trade_entity_graph/config.py` | 读取本地环境、数据库路径、导入归档根目录、规则版本、字段映射版本 |
 | 数据库 | `src/trade_entity_graph/db/` | SQLite 连接、schema、迁移脚本和初始化 |
-| 导入 | `src/trade_entity_graph/importers/` | Excel/CSV 读取、原始文件归档、字段映射、企业加载、订单证据加载、候选导入 |
+| 导入 | `src/trade_entity_graph/importers/` | Excel/CSV 读取、原始文件归档、字段映射、企业加载、订单证据加载、候选导入、已确认关系导入 |
 | 服务 | `src/trade_entity_graph/services/` | 企业搜索、关系聚合、图查询、审核写回、导出 |
 | API | `src/trade_entity_graph/api/` | FastAPI app 和 REST routers |
 | UI | `src/trade_entity_graph/ui/` | Streamlit MVP 页面 |
@@ -52,7 +52,7 @@ Python 环境约定：
 
 ### 3.1 导入批次
 
-`import_batch` 保存每次导入的上下文，用 `run_id` 串联订单证据、企业别名和关系候选。
+`import_batch` 保存每次导入的上下文，用 `run_id` 串联订单证据、企业别名、关系候选和已确认关系导入。
 
 关键字段：`run_id`、`source_file`、`source_path`、`imported_by`、`field_mapping_version`、`rule_version`、`success_rows`、`error_rows`、`error_summary`。
 
@@ -92,6 +92,8 @@ P1 角色边：
 
 `relationship_claim` 保存系统基于订单共现、角色强度、TEU、目的国、产品、名称信号等生成的候选关系。
 
+已有关系候选文件也写入 `relationship_claim`。这类导入只表示“待审核线索”，不能直接进入最终关系。
+
 P0 字段能力：
 
 - 企业对：`from_entity_id`、`to_entity_id`；
@@ -104,6 +106,8 @@ P0 字段能力：
 ### 3.5 最终关系与人工决策
 
 `curated_relationship` 保存业务认可的关系结论，`relationship_decision` 保存每次人工审核动作。
+
+已确认关系文件通过独立导入入口写入 `curated_relationship`，不进入 `relationship_claim`。导入时默认 `relation_status=verified`、`source_type=imported_confirmed`、`verified_by=imported_by`，同时写入 `relationship_decision.action_type=import_confirmed` 和 `audit_log.action_type=import_confirmed`。文件必须提供可解析的起点企业、终点企业和 `relation_type`；未知企业、自己连自己、缺少关系类型和非法数值仍进入导入质量闭环。
 
 最终关系状态：`candidate`、`pending_verify`、`verified`、`rejected`、`conflict`、`deprecated`、`manual_only`。
 
@@ -126,7 +130,7 @@ P0 字段能力：
 | `/relationships/manual` | POST | 支持人工新增关系 |
 | `/reviews/queue` | GET | P1，按状态、批次、关键词和置信等级查看全局待审核候选关系 |
 | `/exports/relationships` | POST | 导出关系明细 Excel/CSV |
-| `/imports/run` | POST | 触发导入、订单角色边生成和候选聚合，返回 `run_id`、统计信息和 `archived_files` |
+| `/imports/run` | POST | 触发导入、订单角色边生成、候选聚合和已确认关系直导，返回 `run_id`、统计信息、`curated_relationship_count` 和 `archived_files` |
 | `/paths?from=&to=` | GET | P1，返回两个企业之间的关系路径 |
 | `/imports` | GET | P1，查看导入批次 |
 
@@ -175,7 +179,7 @@ MVP 使用 Streamlit 快速实现，后续可迁移 React + AntV G6/Cytoscape.js
 
 | 页面/模块 | P0 功能 |
 | --- | --- |
-| 首页/导入页 | 输入本地订单/企业/关系文件路径，触发导入，展示成功行数、异常行数、`run_id` 和原始文件归档路径 |
+| 首页/导入页 | 输入本地订单、企业、候选关系和已确认关系文件路径，触发导入，展示成功行数、异常行数、`run_id` 和原始文件归档路径 |
 | 企业搜索页 | 输入关键词搜索标准名、原始名、清洗名和别名，点击企业进入详情或图谱 |
 | 企业详情页 | 展示主体信息、别名、订单统计、关系统计、最近证据和最近人工决策 |
 | 关系图谱页 | 展示中心企业一跳关系，按节点类型、边类型、关系状态编码，默认隐藏 `rejected` |
@@ -225,7 +229,7 @@ P0 测试优先覆盖闭环风险：
 
 截至 2026-05-28，当前分支已完成 M2-M8 P0 闭环、导入源文件归档、历史关系复用和中文工作台收口：
 
-- M2：导入企业、订单和已有关系候选，记录 `import_batch` 和 `import_source_file`。
+- M2：导入企业、订单、已有关系候选和已确认关系，记录 `import_batch` 和 `import_source_file`。
 - M3/M4：生成 P0 订单角色边并聚合关系候选。
 - M5：提供实体、关系、图谱、审核和导出服务。
 - M6：提供 FastAPI P0 endpoint，`/imports/run` 返回 `archived_files`，并提供 `/reviews/queue` 全局待审核队列。

@@ -18,6 +18,8 @@
 - 不要把订单共现关系直接当作最终企业关系。
 - 不要默认把 `A-B same_group`、`B-C same_group` 推导成 `A-C same_group`，除非业务明确允许集团连通推断。
 
+如果外部项目已经有业务确认过的关系，应通过本项目“已确认关系文件路径”导入入口写入，不要绕过导入质量、审计和原始文件归档机制直接改表。
+
 ## 2. 数据库位置
 
 默认数据库路径：
@@ -42,8 +44,8 @@ $env:TEG_RELATIONSHIP_DB="D:\Github\trade-entity-graph\data\processed\trade_enti
 | --- | --- |
 | `entity` | 企业主体主表，核心字段是 `entity_id`、`canonical_name`、`country`、`entity_type`、`status` |
 | `entity_alias` | 企业别名表，用于从原始企业名、清洗名、历史名匹配到 `entity_id` |
-| `curated_relationship` | 人工确认、否定、待验证或人工新增的最终关系表 |
-| `relationship_decision` | 人工审核记录，可用于查看谁在何时因为什么原因确认或否定 |
+| `curated_relationship` | 人工确认、已确认文件导入、否定、待验证或人工新增的最终关系表 |
+| `relationship_decision` | 人工审核和已确认关系导入记录，可用于查看谁在何时因为什么原因确认或否定 |
 | `relationship_claim` | 系统候选关系，只能作为提示，不应直接当作已确认关系 |
 
 最重要的可信来源是 `curated_relationship`。
@@ -457,6 +459,7 @@ unknown / uncertain:
 建议约定：
 
 - 本项目完成新一批导入和人工审核后，其他项目再运行批量判断。
+- 如果新批次数据本身已经确认关系，可用本项目导入页的“已确认关系文件路径”入口批量导入，文件至少提供起点企业、终点企业和 `relation_type`。
 - 调用项目只读打开数据库，避免误写。
 - 如果判断结果影响正式业务动作，应记录返回的 `relationship_id`、`relation_type`、`relation_status`、`verified_at`，方便后续追溯。
 - 如果调用项目发现关系缺失或疑似错误，不要直接修改数据库，应回到本项目走关系审核或人工新增流程。

@@ -328,6 +328,14 @@ def get_import_batch_detail(
                 "SELECT COUNT(*) AS count FROM relationship_claim WHERE run_id = ?",
                 (run_id,),
             ).fetchone()["count"],
+            "curated_relationships": connection.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM curated_relationship
+                WHERE substr(decision_source, 1, ?) = ?
+                """,
+                (len(f"{run_id}:"), f"{run_id}:"),
+            ).fetchone()["count"],
         }
         quality_summary = _quality_summary(connection, run_id)
 

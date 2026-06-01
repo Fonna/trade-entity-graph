@@ -971,6 +971,7 @@ def render_import_tab() -> None:
     entities_path = st.text_input("企业清洗结果文件路径")
     orders_path = st.text_input("订单明细文件路径")
     relationships_path = st.text_input("已有关系候选文件路径")
+    confirmed_relationships_path = st.text_input("已确认关系文件路径（直接进入最终关系）")
     imported_by = st.text_input("导入人", value="local_user")
     confirm_duplicate_import = st.checkbox("确认重复导入")
     if st.button("开始导入"):
@@ -980,6 +981,7 @@ def render_import_tab() -> None:
                 ("entities", entities_path),
                 ("orders", orders_path),
                 ("relationships", relationships_path),
+                ("confirmed_relationships", confirmed_relationships_path),
             )
             if source_path
         ]
@@ -1000,6 +1002,11 @@ def render_import_tab() -> None:
                     entities_path=Path(entities_path) if entities_path else None,
                     orders_path=Path(orders_path) if orders_path else None,
                     relationships_path=Path(relationships_path) if relationships_path else None,
+                    confirmed_relationships_path=(
+                        Path(confirmed_relationships_path)
+                        if confirmed_relationships_path
+                        else None
+                    ),
                     imported_by=imported_by,
                 )
             )

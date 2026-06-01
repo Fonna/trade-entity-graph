@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 from urllib.parse import urlencode
 
 import pandas as pd
@@ -1373,6 +1374,55 @@ def test_import_endpoint_default_preserves_imported_claims_without_edges(
     assert calls == ["RUN_IMPORTED_CLAIMS_DEFAULT"]
 
 
+def test_import_endpoint_accepts_confirmed_relationships_path(monkeypatch) -> None:
+    class ImportResult:
+        run_id = "RUN_CONFIRMED_RELATIONSHIPS"
+        entity_count = 0
+        alias_count = 0
+        evidence_count = 0
+        claim_count = 0
+        curated_relationship_count = 2
+        skipped_rows = []
+        archived_files = []
+        import_errors = []
+        error_count = 0
+        warning_count = 0
+        quality_summary = {}
+
+    captured_inputs = []
+    checked_sources = []
+
+    def fake_find_duplicate_import(sources):
+        checked_sources.extend((role, path.name) for role, path in sources)
+        return None
+
+    def fake_run_import(inputs):
+        captured_inputs.append(inputs)
+        return ImportResult()
+
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.find_duplicate_import",
+        fake_find_duplicate_import,
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.run_import",
+        fake_run_import,
+    )
+
+    payload = run_import_endpoint(
+        ImportRunRequest(
+            confirmed_relationships_path="confirmed.csv",
+            generate_edges=False,
+            aggregate_claims=False,
+        )
+    )
+
+    assert captured_inputs[0].confirmed_relationships_path == Path("confirmed.csv")
+    assert checked_sources == [("confirmed_relationships", "confirmed.csv")]
+    assert payload["curated_relationship_count"] == 2
+    assert payload["claim_count"] == 0
+
+
 def test_imports_api_lists_batches_with_quality_summary(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "api-import-list.db"
     monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
@@ -1785,6 +1835,32 @@ def test_import_duplicate_check_endpoint_returns_warning_without_running_import(
     assert checked_sources == [("orders", "orders.csv")]
     assert payload["duplicate_import_warning"] is True
     assert payload["duplicate_import_match"]["run_id"] == "RUN_PREVIOUS"
+
+
+def test_import_duplicate_check_includes_confirmed_relationships(monkeypatch) -> None:
+    checked_sources = []
+
+    def fake_find_duplicate_import(sources):
+        checked_sources.extend((role, path.name) for role, path in sources)
+        return None
+
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.find_duplicate_import",
+        fake_find_duplicate_import,
+    )
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(),
+        "POST",
+        "/imports/duplicate-check",
+        json_body={"confirmed_relationships_path": "confirmed.csv"},
+    )
+
+    assert status == 200
+    assert checked_sources == [("confirmed_relationships", "confirmed.csv")]
+    assert payload["duplicate_import_warning"] is False
 
 
 def test_import_run_api_returns_400_for_missing_file(tmp_path, monkeypatch) -> None:

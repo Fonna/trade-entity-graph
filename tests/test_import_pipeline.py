@@ -119,6 +119,229 @@ def test_run_import_allows_entities_without_country_or_entity_type(tmp_path, mon
     assert row["entity_type"] is None
 
 
+def test_run_import_loads_confirmed_relationships_as_curated_records(
+    tmp_path, monkeypatch
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    confirmed_relationships_path = tmp_path / "confirmed_relationships.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING", "BETA FACTORY"],
+            "original_name": ["Acme Trading Ltd", "Beta Factory Inc"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(
+        {
+            "from_entity_name": ["ACME TRADING"],
+            "to_entity_name": ["BETA FACTORY"],
+            "relation_type": ["supplier_factory"],
+            "confidence_level": ["high"],
+            "confidence_score": ["0.92"],
+            "decision_note": ["confirmed before import"],
+        }
+    ).to_csv(confirmed_relationships_path, index=False)
+
+    result = run_import(
+        ImportInputs(
+            entities_path=entities_path,
+            confirmed_relationships_path=confirmed_relationships_path,
+            imported_by="tester",
+        ),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        curated = connection.execute(
+            """
+            SELECT cr.*, from_entity.canonical_name AS from_name,
+                   to_entity.canonical_name AS to_name
+            FROM curated_relationship cr
+            JOIN entity from_entity ON from_entity.entity_id = cr.from_entity_id
+            JOIN entity to_entity ON to_entity.entity_id = cr.to_entity_id
+            """
+        ).fetchone()
+        decision = connection.execute(
+            """
+            SELECT relationship_id, claim_id, action_type, after_relation_type,
+                   after_status, reason, operator
+            FROM relationship_decision
+            """
+        ).fetchone()
+        audit = connection.execute(
+            """
+            SELECT object_type, object_id, action_type, after_value, operator, reason
+            FROM audit_log
+            """
+        ).fetchone()
+        archived_roles = [
+            row["source_role"]
+            for row in connection.execute(
+                """
+                SELECT source_role
+                FROM import_source_file
+                WHERE run_id = ?
+                ORDER BY source_role
+                """,
+                (result.run_id,),
+            ).fetchall()
+        ]
+        batch = connection.execute(
+            """
+            SELECT success_rows, error_rows, warning_rows
+            FROM import_batch
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    detail = get_import_batch_detail(result.run_id, db_path=db_path)
+
+    assert result.curated_relationship_count == 1
+    assert detail["counts"]["curated_relationships"] == 1
+    assert result.claim_count == 0
+    assert curated["from_name"] == "ACME TRADING"
+    assert curated["to_name"] == "BETA FACTORY"
+    assert curated["relation_type"] == "supplier_factory"
+    assert curated["relation_status"] == "verified"
+    assert curated["confidence_level"] == "high"
+    assert curated["confidence_score"] == 0.92
+    assert curated["source_type"] == "imported_confirmed"
+    assert curated["decision_source"] == (
+        f"{result.run_id}:confirmed_relationships.csv:confirmed_relationships:2"
+    )
+    assert curated["decision_note"] == "confirmed before import"
+    assert curated["verified_by"] == "tester"
+    assert curated["verified_at"] is not None
+    assert dict(decision) == {
+        "relationship_id": curated["relationship_id"],
+        "claim_id": None,
+        "action_type": "import_confirmed",
+        "after_relation_type": "supplier_factory",
+        "after_status": "verified",
+        "reason": "confirmed before import",
+        "operator": "tester",
+    }
+    assert dict(audit) == {
+        "object_type": "curated_relationship",
+        "object_id": curated["relationship_id"],
+        "action_type": "import_confirmed",
+        "after_value": "verified",
+        "operator": "tester",
+        "reason": "confirmed before import",
+    }
+    assert archived_roles == ["confirmed_relationships", "entities"]
+    assert batch["success_rows"] == 3
+    assert batch["error_rows"] == 0
+    assert batch["warning_rows"] == 0
+
+
+def test_run_import_loads_confirmed_relationships_with_chinese_headers(
+    tmp_path, monkeypatch
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    confirmed_relationships_path = tmp_path / "confirmed_relationships.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING", "BETA FACTORY"],
+            "original_name": ["Acme Trading Ltd", "Beta Factory Inc"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(
+        {
+            "主体A": ["ACME TRADING"],
+            "主体B": ["BETA FACTORY"],
+            "关系类型": ["trading_partner"],
+            "置信度分数": ["0.88"],
+            "确认理由": ["业务已确认"],
+        }
+    ).to_csv(confirmed_relationships_path, index=False)
+
+    result = run_import(
+        ImportInputs(
+            entities_path=entities_path,
+            confirmed_relationships_path=confirmed_relationships_path,
+            imported_by="tester",
+        ),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        curated = connection.execute(
+            """
+            SELECT relation_type, confidence_score, decision_note
+            FROM curated_relationship
+            """
+        ).fetchone()
+
+    assert result.curated_relationship_count == 1
+    assert dict(curated) == {
+        "relation_type": "trading_partner",
+        "confidence_score": 0.88,
+        "decision_note": "业务已确认",
+    }
+
+
+def test_run_import_rejects_confirmed_relationship_without_relation_type(
+    tmp_path, monkeypatch
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    confirmed_relationships_path = tmp_path / "confirmed_relationships.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    monkeypatch.setenv("TEG_IMPORT_ARCHIVE_ROOT", str(tmp_path / "archives"))
+
+    pd.DataFrame(
+        {
+            "canonical_name": ["ACME TRADING", "BETA FACTORY"],
+            "original_name": ["Acme Trading Ltd", "Beta Factory Inc"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(
+        {
+            "from_entity_name": ["ACME TRADING"],
+            "to_entity_name": ["BETA FACTORY"],
+            "relation_type": [""],
+        }
+    ).to_csv(confirmed_relationships_path, index=False)
+
+    result = run_import(
+        ImportInputs(
+            entities_path=entities_path,
+            confirmed_relationships_path=confirmed_relationships_path,
+            imported_by="tester",
+        ),
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as connection:
+        curated_count = connection.execute(
+            "SELECT COUNT(*) FROM curated_relationship"
+        ).fetchone()[0]
+        error = connection.execute(
+            """
+            SELECT file_role, error_type, severity, normalized_field
+            FROM import_error
+            WHERE run_id = ?
+            """,
+            (result.run_id,),
+        ).fetchone()
+
+    assert result.curated_relationship_count == 0
+    assert curated_count == 0
+    assert dict(error) == {
+        "file_role": "confirmed_relationships",
+        "error_type": "missing_required_field",
+        "severity": "blocking",
+        "normalized_field": "relation_type",
+    }
+    assert result.error_count == 1
+
+
 def test_run_import_records_invalid_relationship_numeric_and_keeps_entities(
     tmp_path, monkeypatch
 ) -> None:

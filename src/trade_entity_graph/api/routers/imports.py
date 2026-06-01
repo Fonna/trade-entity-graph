@@ -36,6 +36,7 @@ class ImportRunRequest(BaseModel):
     orders_path: str | None = None
     entities_path: str | None = None
     relationships_path: str | None = None
+    confirmed_relationships_path: str | None = None
     imported_by: str = "local_user"
     generate_edges: bool = True
     aggregate_claims: bool = True
@@ -48,7 +49,12 @@ def _not_found_from_value_error(exc: ValueError) -> HTTPException:
 def _import_failure_detail(exc: Exception, inputs: ImportInputs) -> str:
     paths = [
         str(path)
-        for path in (inputs.orders_path, inputs.entities_path, inputs.relationships_path)
+        for path in (
+            inputs.orders_path,
+            inputs.entities_path,
+            inputs.relationships_path,
+            inputs.confirmed_relationships_path,
+        )
         if path is not None
     ]
     path_text = f" for {', '.join(paths)}" if paths else ""
@@ -64,6 +70,8 @@ def _input_sources(inputs: ImportInputs) -> list[tuple[str, Path]]:
         sources.append(("orders", Path(inputs.orders_path)))
     if inputs.relationships_path is not None:
         sources.append(("relationships", Path(inputs.relationships_path)))
+    if inputs.confirmed_relationships_path is not None:
+        sources.append(("confirmed_relationships", Path(inputs.confirmed_relationships_path)))
     return sources
 
 
@@ -143,6 +151,11 @@ def duplicate_import_check_endpoint(request: ImportRunRequest) -> dict[str, obje
         relationships_path=(
             Path(request.relationships_path) if request.relationships_path else None
         ),
+        confirmed_relationships_path=(
+            Path(request.confirmed_relationships_path)
+            if request.confirmed_relationships_path
+            else None
+        ),
         imported_by=request.imported_by,
     )
     return _duplicate_import_payload(inputs)
@@ -155,6 +168,11 @@ def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
         entities_path=Path(request.entities_path) if request.entities_path else None,
         relationships_path=(
             Path(request.relationships_path) if request.relationships_path else None
+        ),
+        confirmed_relationships_path=(
+            Path(request.confirmed_relationships_path)
+            if request.confirmed_relationships_path
+            else None
         ),
         imported_by=request.imported_by,
     )
@@ -182,6 +200,7 @@ def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
         "evidence_count": result.evidence_count,
         "edge_count": edge_count,
         "claim_count": claim_count,
+        "curated_relationship_count": getattr(result, "curated_relationship_count", 0),
         "history_reuse": history_reuse,
         "skipped_rows": result.skipped_rows,
         "archived_files": result.archived_files,

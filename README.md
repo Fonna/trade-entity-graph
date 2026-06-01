@@ -110,6 +110,8 @@ uv run pytest
 
 M9 面向真实 Excel/CSV 试运行：默认字段映射可识别常见中文/英文别名，支持通过配置适配不同来源文件。导入过程会保留有效行，并将字段缺失、必填值为空、TEU 格式错误、未知企业引用、无效关系配对等问题写入 `import_error`，便于追溯和复核。
 
+关系导入分为两个入口：`已有关系候选文件路径` 写入 `relationship_claim`，后续进入人工审核；`已确认关系文件路径` 直接写入 `curated_relationship`，并同步写入 `relationship_decision` 和 `audit_log`。已确认关系文件至少需要能解析出 `from_entity_id/from_entity_name`、`to_entity_id/to_entity_name` 和 `relation_type`；`relation_status` 默认 `verified`，`source_type` 默认 `imported_confirmed`，`verified_by` 使用导入人。
+
 导入批次和质量结果可通过 API 查询：`GET /imports`、`GET /imports/{run_id}`、`GET /imports/{run_id}/errors`、`GET /imports/{run_id}/quality-report`。Streamlit 数据导入页展示最近批次、质量摘要、异常明细，并支持导出异常 CSV。
 
 ### M10 二跳图谱与两企业路径查询
@@ -124,6 +126,7 @@ M10 将图谱服务扩展为受控的局部探索：`GET /entities/{entity_id}/e
 flowchart TD
   A[导入订单明细与已有分析结果]
   A0[原始文件归档到 data/raw/imports/run_id]
+  A1[已确认关系导入]
   B[企业名称清洗与主体匹配]
   C[生成订单角色关系]
   D[聚合关系候选]
@@ -135,11 +138,13 @@ flowchart TD
 
   A --> A0
   A0 --> B
+  A0 --> A1
   B --> C
   C --> D
   D --> E
   E --> F
   F --> G
+  A1 --> G
   G --> H
   G --> I
   C --> H
@@ -151,9 +156,9 @@ flowchart TD
 - `entity_alias`：企业别名，保存原始名、清洗名、简称、历史名和人工补充名称。
 - `order_evidence`：订单证据，保存订单号、TEU、目的国、产品、源文件、sheet、行号和 `run_id`。
 - `order_role_edge`：订单角色边，保存下单客户、发货人、收货人、通知人之间的证据关系。
-- `relationship_claim`：系统生成的关系候选。
-- `curated_relationship`：人工确认、否定、待验证或人工新增的最终关系。
-- `relationship_decision`：人工审核记录，保存动作前后状态、理由、操作人和时间。
+- `relationship_claim`：系统生成或候选文件导入的关系候选。
+- `curated_relationship`：人工确认、已确认文件导入、否定、待验证或人工新增的最终关系。
+- `relationship_decision`：人工审核或已确认关系导入记录，保存动作前后状态、理由、操作人和时间。
 - `import_batch`：导入批次，保存源文件、字段映射版本、规则版本、成功/异常行数。
 - `import_source_file`：导入源文件归档记录，保存文件角色、原始路径、归档路径、文件大小和 SHA256。
 - `audit_log`：关键操作审计日志。

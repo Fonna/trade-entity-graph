@@ -20,12 +20,20 @@ from trade_entity_graph.importers.field_mapping import (
 )
 from trade_entity_graph.importers.import_error_loader import write_import_errors
 from trade_entity_graph.importers.models import ImportErrorRecord, ImportInputs, ImportRunResult
-from trade_entity_graph.importers.relationship_loader import load_relationship_claims
+from trade_entity_graph.importers.relationship_loader import (
+    load_confirmed_relationships,
+    load_relationship_claims,
+)
 from trade_entity_graph.importers.source_archive import archive_source_files
 
 
 def _primary_source(inputs: ImportInputs) -> Path:
-    for path in (inputs.orders_path, inputs.entities_path, inputs.relationships_path):
+    for path in (
+        inputs.orders_path,
+        inputs.entities_path,
+        inputs.relationships_path,
+        inputs.confirmed_relationships_path,
+    ):
         if path is not None:
             return Path(path)
     raise ValueError("请至少提供一个导入文件路径")
@@ -39,6 +47,8 @@ def _input_sources(inputs: ImportInputs) -> list[tuple[str, Path]]:
         sources.append(("orders", Path(inputs.orders_path)))
     if inputs.relationships_path is not None:
         sources.append(("relationships", Path(inputs.relationships_path)))
+    if inputs.confirmed_relationships_path is not None:
+        sources.append(("confirmed_relationships", Path(inputs.confirmed_relationships_path)))
     return sources
 
 
@@ -356,6 +366,45 @@ def run_import(inputs: ImportInputs, *, db_path: str | Path | None = None) -> Im
             result.skipped_rows.extend(claim_result.skipped_rows)
             import_errors.extend(claim_result.import_errors)
             success_rows += claim_result.success_rows
+
+        if inputs.confirmed_relationships_path is not None:
+            raw_rows = _read_rows_or_record_file_failure(
+                connection,
+                run_id=run_id,
+                role="confirmed_relationships",
+                path=Path(inputs.confirmed_relationships_path),
+                source_file_id=source_file_ids_by_role.get("confirmed_relationships"),
+                success_rows=success_rows,
+                import_errors=_enrich_error_source_file_ids(
+                    import_errors, source_file_ids_by_role
+                ),
+            )
+            if not raw_rows:
+                import_errors.extend(
+                    _validate_empty_source_headers(
+                        Path(inputs.confirmed_relationships_path),
+                        role="confirmed_relationships",
+                        run_id=run_id,
+                    )
+                )
+            confirmed_relationship_rows, mapping_errors = resolve_rows_for_role(
+                raw_rows,
+                role="confirmed_relationships",
+                run_id=run_id,
+            )
+            import_errors.extend(mapping_errors)
+            confirmed_result = load_confirmed_relationships(
+                connection,
+                confirmed_relationship_rows,
+                run_id=run_id,
+                imported_by=inputs.imported_by,
+            )
+            result.curated_relationship_count = (
+                confirmed_result.curated_relationship_count
+            )
+            result.skipped_rows.extend(confirmed_result.skipped_rows)
+            import_errors.extend(confirmed_result.import_errors)
+            success_rows += confirmed_result.success_rows
 
         import_errors = _enrich_error_source_file_ids(import_errors, source_file_ids_by_role)
         write_import_errors(connection, import_errors)

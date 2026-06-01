@@ -973,7 +973,7 @@ class ImportQualityFakeStreamlit:
         selected_run_id: str = "",
         buttons: dict[str, bool] | None = None,
         checkboxes: dict[str, bool] | None = None,
-        text_inputs: list[str] | None = None,
+        text_inputs: list[str] | dict[str, str] | None = None,
     ) -> None:
         self.selected_run_id = selected_run_id
         self.buttons = buttons or {}
@@ -992,6 +992,8 @@ class ImportQualityFakeStreamlit:
         return None
 
     def text_input(self, label, value="", **_kwargs) -> str:
+        if isinstance(self.text_inputs, dict):
+            return self.text_inputs.get(str(label), value)
         if self.text_inputs is not None:
             response = self.text_inputs[self.text_input_calls]
             self.text_input_calls += 1
@@ -1044,6 +1046,7 @@ def test_import_tab_warns_and_skips_duplicate_import_without_confirmation(
         text_inputs=[
             "data/entities.csv",
             "data/orders.csv",
+            "",
             "",
             "local_user",
             "",
@@ -1105,6 +1108,7 @@ def test_import_tab_allows_duplicate_import_with_confirmation(monkeypatch) -> No
             "data/entities.csv",
             "data/orders.csv",
             "data/relationships.csv",
+            "",
             "local_user",
             "",
         ],
@@ -1153,6 +1157,123 @@ def test_import_tab_allows_duplicate_import_with_confirmation(monkeypatch) -> No
     ]
     assert len(fake_st.successes) == 1
     assert fake_st.json_payloads[0]["run_id"] == "RUN_STREAMLIT_IMPORT"
+
+
+def test_import_tab_passes_confirmed_relationships_path(monkeypatch) -> None:
+    calls: list[object] = []
+    captured_inputs = []
+    fake_st = ImportQualityFakeStreamlit(
+        buttons={"\u5f00\u59cb\u5bfc\u5165": True},
+        text_inputs=[
+            "",
+            "",
+            "",
+            "data/confirmed_relationships.csv",
+            "curator",
+            "",
+        ],
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+
+    def fake_find_duplicate_import(sources):
+        calls.append(("duplicate", sources))
+        return None
+
+    def fake_run_import(inputs):
+        captured_inputs.append(inputs)
+        return _successful_import_result(curated_relationship_count=2)
+
+    def fail_if_aggregated(*_args, **_kwargs):
+        calls.append("aggregate")
+        raise AssertionError("confirmed-only import should not aggregate claims")
+
+    monkeypatch.setattr(streamlit_app, "find_duplicate_import", fake_find_duplicate_import)
+    monkeypatch.setattr(streamlit_app, "run_import", fake_run_import)
+    monkeypatch.setattr(
+        streamlit_app,
+        "generate_order_role_edges",
+        lambda *, run_id: calls.append(f"generate:{run_id}") or {"edge_count": 0},
+    )
+    monkeypatch.setattr(streamlit_app, "aggregate_relationship_claims", fail_if_aggregated)
+    monkeypatch.setattr(
+        streamlit_app,
+        "apply_history_reuse_to_claims",
+        lambda *_args, **_kwargs: calls.append("history_reuse"),
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_batches",
+        lambda **_kwargs: calls.append("history") or {"items": []},
+    )
+
+    streamlit_app.render_import_tab()
+
+    assert captured_inputs[0].confirmed_relationships_path == Path(
+        "data/confirmed_relationships.csv"
+    )
+    assert captured_inputs[0].imported_by == "curator"
+    assert calls == [
+        (
+            "duplicate",
+            [("confirmed_relationships", Path("data/confirmed_relationships.csv"))],
+        ),
+        "generate:RUN_STREAMLIT_IMPORT",
+        "history",
+    ]
+    assert fake_st.json_payloads[0]["curated_relationship_count"] == 2
+
+
+def test_import_tab_warns_on_duplicate_confirmed_relationship_file(monkeypatch) -> None:
+    calls: list[object] = []
+    fake_st = ImportQualityFakeStreamlit(
+        buttons={"\u5f00\u59cb\u5bfc\u5165": True},
+        checkboxes={"\u786e\u8ba4\u91cd\u590d\u5bfc\u5165": False},
+        text_inputs=[
+            "",
+            "",
+            "",
+            "data/confirmed_relationships.csv",
+            "local_user",
+            "",
+        ],
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+
+    def fake_find_duplicate_import(sources):
+        calls.append(("duplicate", sources))
+        return {
+            "run_id": "RUN_CONFIRMED_DUP",
+            "imported_at": "2026-06-01T09:00:00Z",
+            "imported_by": "curator",
+            "source_files": [],
+        }
+
+    def fail_if_called(*_args, **_kwargs):
+        calls.append("unexpected")
+        raise AssertionError("duplicate confirmed imports should require confirmation")
+
+    monkeypatch.setattr(streamlit_app, "find_duplicate_import", fake_find_duplicate_import)
+    monkeypatch.setattr(streamlit_app, "run_import", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "generate_order_role_edges", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "aggregate_relationship_claims", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "apply_history_reuse_to_claims", fail_if_called)
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_batches",
+        lambda **_kwargs: calls.append("history") or {"items": []},
+    )
+
+    streamlit_app.render_import_tab()
+
+    assert calls == [
+        (
+            "duplicate",
+            [("confirmed_relationships", Path("data/confirmed_relationships.csv"))],
+        ),
+        "history",
+    ]
+    assert len(fake_st.warnings) == 1
+    assert "RUN_CONFIRMED_DUP" in fake_st.warnings[0]
 
 
 def test_import_tab_reports_run_import_failure_and_skips_derived_steps(
@@ -1238,13 +1359,16 @@ def test_import_tab_reports_edge_generation_failure_without_crashing(
 
 
 
-def _successful_import_result(*, claim_count: int = 0) -> SimpleNamespace:
+def _successful_import_result(
+    *, claim_count: int = 0, curated_relationship_count: int = 0
+) -> SimpleNamespace:
     return SimpleNamespace(
         run_id="RUN_STREAMLIT_IMPORT",
         entity_count=2,
         alias_count=0,
         evidence_count=1,
         claim_count=claim_count,
+        curated_relationship_count=curated_relationship_count,
         skipped_rows=[],
         archived_files=[],
         import_errors=[],
