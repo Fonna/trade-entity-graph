@@ -249,6 +249,177 @@ def test_graph_summary_counts_prefers_summary_values() -> None:
     assert streamlit_app.graph_summary_counts(graph) == (10, 20, 30, 40)
 
 
+class GraphFakeColumn:
+    def metric(self, *_args, **_kwargs) -> None:
+        return None
+
+
+class GraphFakeExpander:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+
+class GraphFakeStreamlit:
+    def __init__(
+        self,
+        *,
+        center_entity_id: str = "",
+        depth: int = 1,
+        max_nodes: int = 50,
+        path_from: str = "",
+        path_to: str = "",
+        max_depth: int = 3,
+        max_paths: int = 5,
+        query_paths: bool = False,
+    ) -> None:
+        self.text_inputs = [center_entity_id, path_from, path_to]
+        self.number_inputs = [depth, max_nodes, max_depth, max_paths]
+        self.query_paths = query_paths
+        self.frames: list[object] = []
+        self.infos: list[str] = []
+        self.text_input_calls = 0
+        self.number_input_calls = 0
+
+    def subheader(self, *_args, **_kwargs) -> None:
+        return None
+
+    def text_input(self, *_args, **_kwargs) -> str:
+        response = self.text_inputs[self.text_input_calls]
+        self.text_input_calls += 1
+        return response
+
+    def checkbox(self, *_args, **_kwargs) -> bool:
+        return False
+
+    def number_input(self, *_args, **_kwargs) -> int:
+        response = self.number_inputs[self.number_input_calls]
+        self.number_input_calls += 1
+        return response
+
+    def columns(self, count: int):
+        return [GraphFakeColumn() for _ in range(count)]
+
+    def markdown(self, *_args, **_kwargs) -> None:
+        return None
+
+    def dataframe(self, rows, **_kwargs) -> None:
+        self.frames.append(rows)
+
+    def info(self, message, **_kwargs) -> None:
+        self.infos.append(str(message))
+
+    def json(self, *_args, **_kwargs) -> None:
+        return None
+
+    def selectbox(self, _label, options, **_kwargs):
+        return list(options)[0]
+
+    def button(self, label, **_kwargs) -> bool:
+        return self.query_paths and "\u8def\u5f84" in str(label)
+
+    def success(self, *_args, **_kwargs) -> None:
+        return None
+
+    def expander(self, *_args, **_kwargs) -> GraphFakeExpander:
+        return GraphFakeExpander()
+
+
+def test_graph_tab_requests_depth_two_graph(monkeypatch) -> None:
+    calls = []
+    fake_st = GraphFakeStreamlit(center_entity_id="ENT_A", depth=2, max_nodes=25)
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app.components, "html", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_ego_graph",
+        lambda entity_id, **kwargs: calls.append((entity_id, kwargs))
+        or {"nodes": [], "edges": [], "summary": {"node_count": 0, "edge_count": 0}},
+    )
+
+    streamlit_app.render_graph_tab()
+
+    assert calls == [("ENT_A", {"include_rejected": False, "depth": 2, "max_nodes": 25})]
+
+
+def test_graph_tab_renders_entity_path_results(monkeypatch) -> None:
+    calls = []
+    fake_st = GraphFakeStreamlit(
+        center_entity_id="ENT_A",
+        path_from="ENT_A",
+        path_to="ENT_C",
+        query_paths=True,
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app.components, "html", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_ego_graph",
+        lambda *_args, **_kwargs: {"nodes": [], "edges": [], "summary": {}},
+    )
+
+    def fake_find_entity_paths(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {
+            "path_count": 1,
+            "paths": [
+                {
+                    "edges": [
+                        {
+                            "source_label": "A",
+                            "target_label": "B",
+                            "relation_type": "customer_to_shipper",
+                            "record_type": "order_role_edge",
+                            "status": "evidence",
+                            "evidence": "order ORD_1",
+                        }
+                    ]
+                }
+            ],
+        }
+
+    monkeypatch.setattr(streamlit_app, "find_entity_paths", fake_find_entity_paths)
+
+    streamlit_app.render_graph_tab()
+
+    assert calls == [
+        (
+            ("ENT_A", "ENT_C"),
+            {"include_rejected": False, "max_depth": 3, "max_paths": 5},
+        )
+    ]
+    assert fake_st.frames
+    assert fake_st.frames[0][0]["step"] == 1
+    assert fake_st.frames[0][0]["from_name"] == "A"
+
+
+def test_graph_tab_renders_no_path_info(monkeypatch) -> None:
+    fake_st = GraphFakeStreamlit(
+        center_entity_id="ENT_A",
+        path_from="ENT_A",
+        path_to="ENT_Z",
+        query_paths=True,
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app.components, "html", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_ego_graph",
+        lambda *_args, **_kwargs: {"nodes": [], "edges": [], "summary": {}},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "find_entity_paths",
+        lambda *_args, **_kwargs: {"path_count": 0, "paths": []},
+    )
+
+    streamlit_app.render_graph_tab()
+
+    assert any("No path" in message or "\u672a\u627e\u5230" in message for message in fake_st.infos)
+
+
 def test_selected_claim_state_helpers_round_trip() -> None:
     state: dict[str, str] = {}
 

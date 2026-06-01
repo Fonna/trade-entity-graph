@@ -15,7 +15,7 @@ from trade_entity_graph.importers.models import ImportInputs
 from trade_entity_graph.importers.pipeline import run_import
 from trade_entity_graph.services.entity_service import get_entity_detail, search_entities
 from trade_entity_graph.services.export_service import export_relationship_rows
-from trade_entity_graph.services.graph_service import get_ego_graph
+from trade_entity_graph.services.graph_service import find_entity_paths, get_ego_graph
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
 from trade_entity_graph.services.import_quality_service import (
     export_import_errors,
@@ -985,16 +985,23 @@ def render_search_tab() -> None:
 
 
 def render_graph_tab() -> None:
-    """Render one-hop graph visualization and candidate handoff."""
+    """Render bounded graph visualization, path query, and candidate handoff."""
 
     st.subheader("一跳关系图谱")
     center_entity_id = st.text_input("中心企业 ID")
     include_rejected = st.checkbox("包含已否定的人工关系")
+    depth = int(st.number_input("Graph depth", min_value=1, max_value=2, value=1, step=1))
+    max_nodes = int(st.number_input("Max nodes", min_value=1, max_value=200, value=50, step=5))
     if not center_entity_id:
         st.info("请输入中心企业 ID 后查看一跳关系图谱。")
         return
 
-    graph = get_ego_graph(center_entity_id, include_rejected=include_rejected)
+    graph = get_ego_graph(
+        center_entity_id,
+        include_rejected=include_rejected,
+        depth=depth,
+        max_nodes=max_nodes,
+    )
     nodes = graph.get("nodes") or []
     edges = graph.get("edges") or []
     node_count, edge_count, candidate_edge_count, curated_edge_count = graph_summary_counts(
@@ -1038,6 +1045,59 @@ def render_graph_tab() -> None:
             st.success(f"已选择候选关系 {selected_claim_id}，请切换到人工审核 tab 继续处理。")
     else:
         st.info("当前中心企业暂无待审核候选关系。")
+
+    st.markdown("**\u4e24\u4f01\u4e1a\u8def\u5f84\u67e5\u8be2**")
+    path_from_entity_id = st.text_input("from_entity_id")
+    path_to_entity_id = st.text_input("to_entity_id")
+    path_max_depth = int(
+        st.number_input("Path max_depth", min_value=1, max_value=5, value=3, step=1)
+    )
+    path_max_paths = int(
+        st.number_input("Path max_paths", min_value=1, max_value=20, value=5, step=1)
+    )
+    if st.button("\u67e5\u8be2\u8def\u5f84") and path_from_entity_id and path_to_entity_id:
+        try:
+            path_result = find_entity_paths(
+                path_from_entity_id,
+                path_to_entity_id,
+                include_rejected=include_rejected,
+                max_depth=path_max_depth,
+                max_paths=path_max_paths,
+            )
+        except ValueError as exc:
+            st.error(format_error_message(exc))
+        else:
+            path_rows: list[dict[str, Any]] = []
+            for path_index, path_item in enumerate(path_result.get("paths") or [], start=1):
+                for step_index, edge in enumerate(path_item.get("edges") or [], start=1):
+                    path_rows.append(
+                        {
+                            "path": path_index,
+                            "step": step_index,
+                            "from_name": edge.get("source_label")
+                            or edge.get("from_name")
+                            or edge.get("source")
+                            or edge.get("from_entity_id")
+                            or "-",
+                            "to_name": edge.get("target_label")
+                            or edge.get("to_name")
+                            or edge.get("target")
+                            or edge.get("to_entity_id")
+                            or "-",
+                            "relation_type": edge.get("relation_type") or "-",
+                            "record_type": edge.get("record_type") or edge.get("edge_type") or "-",
+                            "status": edge.get("status") or edge.get("relation_status") or "-",
+                            "evidence": edge.get("evidence")
+                            or edge.get("recommendation_reason")
+                            or edge.get("label")
+                            or edge.get("order_id")
+                            or "-",
+                        }
+                    )
+            if path_rows:
+                st.dataframe(path_rows)
+            else:
+                st.info("\u672a\u627e\u5230\u8def\u5f84 / No path found")
 
     with st.expander("节点与边数据"):
         show_table(nodes)
