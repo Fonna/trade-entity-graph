@@ -204,6 +204,65 @@ def test_find_entity_paths_ranks_same_depth_paths_by_confidence_before_volume(tm
 
     assert result["path_count"] == 2
     assert result["paths"][0]["node_ids"] == ["ENT_A", "ENT_Y", "ENT_C"]
+    assert result["paths"][0]["score"] == pytest.approx(0.8)
+
+
+def test_find_entity_paths_collapses_parallel_order_edges_into_one_route(tmp_path):
+    db_path = _seed_path_graph(tmp_path)
+    with get_connection(db_path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO order_role_edge (
+                edge_id,
+                order_id,
+                from_entity_id,
+                from_role,
+                to_entity_id,
+                to_role,
+                role_pair_type,
+                teu
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "ORE_AB_DUP_1",
+                    "ORD_DUP_1",
+                    "ENT_A",
+                    "customer",
+                    "ENT_B",
+                    "shipper",
+                    "customer_to_shipper",
+                    4.0,
+                ),
+                (
+                    "ORE_AB_DUP_2",
+                    "ORD_DUP_2",
+                    "ENT_A",
+                    "customer",
+                    "ENT_B",
+                    "shipper",
+                    "customer_to_shipper",
+                    5.5,
+                ),
+            ],
+        )
+
+    result = find_entity_paths(
+        "ENT_A",
+        "ENT_B",
+        db_path=db_path,
+        max_depth=1,
+        max_paths=1,
+    )
+
+    assert result["path_count"] == 1
+    assert result["summary"]["truncated"] is False
+    path = result["paths"][0]
+    assert path["node_ids"] == ["ENT_A", "ENT_B"]
+    assert len(path["edges"]) == 1
+    assert path["edges"][0]["order_count"] == 3
+    assert path["edges"][0]["total_teu"] == pytest.approx(11.5)
 
 
 def test_find_entity_paths_hides_rejected_curated_relationship_by_default(tmp_path):
