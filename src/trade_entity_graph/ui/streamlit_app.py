@@ -1061,7 +1061,7 @@ def render_graph_tab() -> None:
         )
         st.info(format_relationship_detail_summary(selected_edge))
         st.json(selected_edge)
-        if st.button("带到人工审核 tab"):
+        if st.button("带到人工审核 tab", key="graph_to_review_button"):
             set_selected_claim_id(selected_claim_id)
             st.success(f"已选择候选关系 {selected_claim_id}，请切换到人工审核 tab 继续处理。")
     else:
@@ -1184,7 +1184,7 @@ def render_review_queue_tab() -> None:
     st.markdown(format_manual_review_context(selected_detail))
     with st.expander("查看订单证据"):
         show_table(get_relationship_evidence(selected_claim_id))
-    if st.button("带到人工审核 tab"):
+    if st.button("带到人工审核 tab", key="review_queue_to_review_button"):
         set_selected_claim_id(selected_claim_id)
         st.success(f"已选择候选关系 {selected_claim_id}，请切换到人工审核 tab 继续处理。")
 

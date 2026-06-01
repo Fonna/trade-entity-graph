@@ -281,6 +281,7 @@ class GraphFakeStreamlit:
         self.frames: list[object] = []
         self.infos: list[str] = []
         self.errors: list[str] = []
+        self.button_calls: list[tuple[str, dict]] = []
         self.text_input_calls = 0
         self.number_input_calls = 0
 
@@ -321,7 +322,8 @@ class GraphFakeStreamlit:
     def selectbox(self, _label, options, **_kwargs):
         return list(options)[0]
 
-    def button(self, label, **_kwargs) -> bool:
+    def button(self, label, **kwargs) -> bool:
+        self.button_calls.append((str(label), kwargs))
         return self.query_paths and "\u8def\u5f84" in str(label)
 
     def success(self, *_args, **_kwargs) -> None:
@@ -346,6 +348,39 @@ def test_graph_tab_requests_depth_two_graph(monkeypatch) -> None:
     streamlit_app.render_graph_tab()
 
     assert calls == [("ENT_A", {"include_rejected": False, "depth": 2, "max_nodes": 25})]
+
+
+def test_graph_tab_handoff_button_has_unique_key(monkeypatch) -> None:
+    fake_st = GraphFakeStreamlit(center_entity_id="ENT_A")
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app.components, "html", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_ego_graph",
+        lambda *_args, **_kwargs: {
+            "nodes": [{"id": "ENT_A", "label": "Alpha"}],
+            "edges": [
+                {
+                    "id": "CLM_GRAPH",
+                    "edge_type": "relationship_claim",
+                    "record_type": "relationship_claim",
+                    "source": "ENT_A",
+                    "target": "ENT_B",
+                    "relation_type": "trading_partner_candidate",
+                    "confidence_level": "high",
+                    "order_count": 1,
+                }
+            ],
+            "summary": {},
+        },
+    )
+
+    streamlit_app.render_graph_tab()
+
+    assert any(
+        kwargs.get("key") == "graph_to_review_button"
+        for _label, kwargs in fake_st.button_calls
+    )
 
 
 def test_graph_tab_renders_entity_path_results(monkeypatch) -> None:
@@ -1418,6 +1453,7 @@ def test_review_queue_tab_displays_queue_and_sets_selected_claim(monkeypatch) ->
             self.session_state: dict[str, str] = {}
             self.frames: list[list[dict]] = []
             self.success_messages: list[str] = []
+            self.button_calls: list[tuple[str, dict]] = []
 
         def subheader(self, *_args, **_kwargs) -> None:
             return None
@@ -1457,7 +1493,8 @@ def test_review_queue_tab_displays_queue_and_sets_selected_claim(monkeypatch) ->
         def expander(self, *_args, **_kwargs) -> FakeExpander:
             return FakeExpander()
 
-        def button(self, label, **_kwargs) -> bool:
+        def button(self, label, **kwargs) -> bool:
+            self.button_calls.append((str(label), kwargs))
             return label == "带到人工审核 tab"
 
         def success(self, message: str) -> None:
@@ -1509,6 +1546,10 @@ def test_review_queue_tab_displays_queue_and_sets_selected_claim(monkeypatch) ->
     assert fake_st.session_state[streamlit_app.SELECTED_CLAIM_STATE_KEY] == "CLM_QUEUE"
     assert fake_st.session_state[streamlit_app.REVIEW_CLAIM_WIDGET_KEY] == "CLM_QUEUE"
     assert fake_st.success_messages
+    assert any(
+        kwargs.get("key") == "review_queue_to_review_button"
+        for _label, kwargs in fake_st.button_calls
+    )
 
 
 def test_review_tab_uses_relation_type_selectboxes(monkeypatch) -> None:
