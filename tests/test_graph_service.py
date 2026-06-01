@@ -96,6 +96,116 @@ def test_find_entity_paths_returns_indirect_path_with_edge_provenance(tmp_path):
     assert "ENT_C" in path["explanation"]
 
 
+def test_find_entity_paths_does_not_mark_single_allowed_path_as_truncated(tmp_path):
+    db_path = _seed_path_graph(tmp_path)
+
+    result = find_entity_paths(
+        "ENT_A",
+        "ENT_C",
+        db_path=db_path,
+        max_depth=3,
+        max_paths=1,
+    )
+
+    assert result["path_count"] == 1
+    assert result["summary"]["truncated"] is False
+
+
+def test_find_entity_paths_ranks_same_depth_paths_by_confidence_before_volume(tmp_path):
+    db_path = _seed_path_graph(tmp_path)
+    with get_connection(db_path) as connection:
+        connection.execute("DELETE FROM order_role_edge")
+        connection.executemany(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type, tags)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                ("ENT_X", "Low Confidence Bridge", "company", "[]"),
+                ("ENT_Y", "High Confidence Bridge", "company", "[]"),
+            ],
+        )
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_RANKING', 'ranking.csv', 'tester')
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO relationship_claim (
+                claim_id,
+                from_entity_id,
+                to_entity_id,
+                candidate_relation_type,
+                relation_status,
+                confidence_level,
+                confidence_score,
+                order_count,
+                total_teu,
+                recommendation_reason,
+                run_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RUN_RANKING')
+            """,
+            [
+                (
+                    "CLM_AX_LOW",
+                    "ENT_A",
+                    "ENT_X",
+                    "trading_partner_candidate",
+                    "candidate",
+                    "low",
+                    0.2,
+                    100,
+                    300.0,
+                    "high volume but low confidence",
+                ),
+                (
+                    "CLM_XC_LOW",
+                    "ENT_X",
+                    "ENT_C",
+                    "trading_partner_candidate",
+                    "candidate",
+                    "low",
+                    0.2,
+                    100,
+                    300.0,
+                    "high volume but low confidence",
+                ),
+                (
+                    "CLM_AY_HIGH",
+                    "ENT_A",
+                    "ENT_Y",
+                    "trading_partner_candidate",
+                    "candidate",
+                    "high",
+                    0.9,
+                    1,
+                    1.0,
+                    "high confidence bridge",
+                ),
+                (
+                    "CLM_YC_HIGH",
+                    "ENT_Y",
+                    "ENT_C",
+                    "trading_partner_candidate",
+                    "candidate",
+                    "high",
+                    0.9,
+                    1,
+                    1.0,
+                    "high confidence bridge",
+                ),
+            ],
+        )
+
+    result = find_entity_paths("ENT_A", "ENT_C", db_path=db_path, max_depth=2)
+
+    assert result["path_count"] == 2
+    assert result["paths"][0]["node_ids"] == ["ENT_A", "ENT_Y", "ENT_C"]
+
+
 def test_find_entity_paths_hides_rejected_curated_relationship_by_default(tmp_path):
     db_path = _seed_path_graph(tmp_path)
     with get_connection(db_path) as connection:

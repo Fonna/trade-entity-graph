@@ -189,16 +189,37 @@ def _edge_priority(edge: dict[str, Any]) -> float:
     return 0.5
 
 
+def _edge_confidence(edge: dict[str, Any]) -> float:
+    raw_score = edge.get("confidence_score")
+    if raw_score is not None:
+        return float(raw_score)
+    confidence_level = edge.get("confidence_level")
+    if confidence_level == "high":
+        return 0.8
+    if confidence_level == "medium":
+        return 0.55
+    if confidence_level == "low":
+        return 0.3
+    if edge["record_type"] == "curated_relationship" and edge["status"] == "verified":
+        return 1.0
+    if edge["record_type"] == "order_role_edge":
+        return 0.5
+    return 0.0
+
+
 def _path_score(edges: list[dict[str, Any]]) -> float:
     if not edges:
         return 1.0
-    edge_score = sum(_edge_priority(edge) for edge in edges) / len(edges)
+    edge_score = sum(
+        (_edge_priority(edge) + _edge_confidence(edge)) / 2 for edge in edges
+    ) / len(edges)
     return round(edge_score / len(edges), 4)
 
 
-def _rank_edge(edge: dict[str, Any]) -> tuple[float, float, float, str]:
+def _rank_edge(edge: dict[str, Any]) -> tuple[float, float, float, float, str]:
     return (
         -_edge_priority(edge),
+        -_edge_confidence(edge),
         -(edge.get("order_count") or 0),
         -(edge.get("total_teu") or 0),
         str(edge["id"]),
@@ -308,8 +329,7 @@ def find_entity_paths(
 
         queue: list[tuple[list[str], list[dict[str, Any]]]] = [([from_entity_id], [])]
         found_paths: list[tuple[list[str], list[dict[str, Any]]]] = []
-        truncated = False
-        while queue and len(found_paths) < max_paths:
+        while queue:
             node_ids, path_edges = queue.pop(0)
             current_id = node_ids[-1]
             if len(path_edges) >= max_depth:
@@ -324,17 +344,15 @@ def find_entity_paths(
                 next_edges = [*path_edges, path_edge]
                 if neighbor_id == to_entity_id:
                     found_paths.append((next_node_ids, next_edges))
-                    if len(found_paths) >= max_paths:
-                        truncated = True
-                        break
                 else:
                     queue.append((next_node_ids, next_edges))
 
         paths = []
-        for node_ids, edges in sorted(
+        sorted_paths = sorted(
             found_paths,
             key=lambda item: (len(item[1]), -_path_score(item[1]), item[0]),
-        ):
+        )
+        for node_ids, edges in sorted_paths[:max_paths]:
             paths.append(
                 {
                     "node_ids": node_ids,
@@ -351,6 +369,7 @@ def find_entity_paths(
                     ),
                 }
             )
+        truncated = len(sorted_paths) > max_paths
 
         return {
             "from_entity_id": from_entity_id,
