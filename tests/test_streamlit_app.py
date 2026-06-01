@@ -404,6 +404,55 @@ def test_graph_tab_renders_entity_path_results(monkeypatch) -> None:
     assert fake_st.frames[0][0]["evidence"] == "order ORD_1"
 
 
+def test_graph_tab_renders_path_step_direction_from_path_metadata(monkeypatch) -> None:
+    fake_st = GraphFakeStreamlit(
+        center_entity_id="ENT_A",
+        path_from="ENT_A",
+        path_to="ENT_C",
+        query_paths=True,
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app.components, "html", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_ego_graph",
+        lambda *_args, **_kwargs: {"nodes": [], "edges": [], "summary": {}},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "find_entity_paths",
+        lambda *_args, **_kwargs: {
+            "path_count": 1,
+            "paths": [
+                {
+                    "nodes": [
+                        {"id": "ENT_A", "label": "Alpha Trading"},
+                        {"id": "ENT_B", "label": "Beta Factory"},
+                    ],
+                    "edges": [
+                        {
+                            "source": "ENT_B",
+                            "target": "ENT_A",
+                            "source_label": "Beta Factory",
+                            "target_label": "Alpha Trading",
+                            "path_from": "ENT_A",
+                            "path_to": "ENT_B",
+                            "relation_type": "customer_to_shipper",
+                            "record_type": "order_role_edge",
+                            "status": "evidence",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    streamlit_app.render_graph_tab()
+
+    assert fake_st.frames[0][0]["from_name"] == "Alpha Trading"
+    assert fake_st.frames[0][0]["to_name"] == "Beta Factory"
+
+
 def test_graph_tab_renders_no_path_info(monkeypatch) -> None:
     fake_st = GraphFakeStreamlit(
         center_entity_id="ENT_A",

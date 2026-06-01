@@ -802,6 +802,27 @@ def graph_summary_counts(graph: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
     )
 
 
+def path_entity_label(path_item: dict[str, Any], edge: dict[str, Any], endpoint: str) -> str:
+    """Return the displayed entity label in the actual path traversal direction."""
+
+    endpoint_id = edge.get(endpoint)
+    if not endpoint_id:
+        source_fallbacks = ("source_label", "from_name", "source", "from_entity_id")
+        target_fallbacks = ("target_label", "to_name", "target", "to_entity_id")
+        fallback_keys = source_fallbacks if endpoint == "path_from" else target_fallbacks
+        for key in fallback_keys:
+            if edge.get(key):
+                return str(edge[key])
+        return "-"
+
+    labels_by_id = {
+        str(node.get("id")): node.get("label") or node.get("canonical_name") or node.get("id")
+        for node in path_item.get("nodes") or []
+        if node.get("id")
+    }
+    return str(labels_by_id.get(str(endpoint_id)) or endpoint_id)
+
+
 def format_candidate_edge_label(edge: dict[str, Any]) -> str:
     """Return a selectbox label for a candidate edge."""
 
@@ -1074,16 +1095,8 @@ def render_graph_tab() -> None:
                         {
                             "path": path_index,
                             "step": step_index,
-                            "from_name": edge.get("source_label")
-                            or edge.get("from_name")
-                            or edge.get("source")
-                            or edge.get("from_entity_id")
-                            or "-",
-                            "to_name": edge.get("target_label")
-                            or edge.get("to_name")
-                            or edge.get("target")
-                            or edge.get("to_entity_id")
-                            or "-",
+                            "from_name": path_entity_label(path_item, edge, "path_from"),
+                            "to_name": path_entity_label(path_item, edge, "path_to"),
                             "relation_type": edge.get("relation_type") or "-",
                             "record_type": edge.get("record_type") or edge.get("edge_type") or "-",
                             "status": edge.get("status") or edge.get("relation_status") or "-",
