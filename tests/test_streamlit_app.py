@@ -280,6 +280,7 @@ class GraphFakeStreamlit:
         self.query_paths = query_paths
         self.frames: list[object] = []
         self.infos: list[str] = []
+        self.errors: list[str] = []
         self.text_input_calls = 0
         self.number_input_calls = 0
 
@@ -310,6 +311,9 @@ class GraphFakeStreamlit:
 
     def info(self, message, **_kwargs) -> None:
         self.infos.append(str(message))
+
+    def error(self, message, **_kwargs) -> None:
+        self.errors.append(str(message))
 
     def json(self, *_args, **_kwargs) -> None:
         return None
@@ -393,6 +397,11 @@ def test_graph_tab_renders_entity_path_results(monkeypatch) -> None:
     assert fake_st.frames
     assert fake_st.frames[0][0]["step"] == 1
     assert fake_st.frames[0][0]["from_name"] == "A"
+    assert fake_st.frames[0][0]["to_name"] == "B"
+    assert fake_st.frames[0][0]["relation_type"] == "customer_to_shipper"
+    assert fake_st.frames[0][0]["record_type"] == "order_role_edge"
+    assert fake_st.frames[0][0]["status"] == "evidence"
+    assert fake_st.frames[0][0]["evidence"] == "order ORD_1"
 
 
 def test_graph_tab_renders_no_path_info(monkeypatch) -> None:
@@ -418,6 +427,32 @@ def test_graph_tab_renders_no_path_info(monkeypatch) -> None:
     streamlit_app.render_graph_tab()
 
     assert any("No path" in message or "\u672a\u627e\u5230" in message for message in fake_st.infos)
+
+
+def test_graph_tab_renders_path_query_error(monkeypatch) -> None:
+    fake_st = GraphFakeStreamlit(
+        center_entity_id="ENT_A",
+        path_from="ENT_A",
+        path_to="NO_SUCH",
+        query_paths=True,
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(streamlit_app.components, "html", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        streamlit_app,
+        "get_ego_graph",
+        lambda *_args, **_kwargs: {"nodes": [], "edges": [], "summary": {}},
+    )
+
+    def raise_unknown_entity(*_args, **_kwargs):
+        raise ValueError("Unknown entity: NO_SUCH")
+
+    monkeypatch.setattr(streamlit_app, "find_entity_paths", raise_unknown_entity)
+
+    streamlit_app.render_graph_tab()
+
+    assert fake_st.errors
+    assert "Unknown entity: NO_SUCH" in fake_st.errors[0]
 
 
 def test_selected_claim_state_helpers_round_trip() -> None:
