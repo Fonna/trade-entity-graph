@@ -130,6 +130,56 @@ def test_find_entity_paths_hides_rejected_curated_relationship_by_default(tmp_pa
     assert include_rejected_result["paths"][0]["edges"][0]["status"] == "rejected"
 
 
+def test_find_entity_paths_includes_history_matched_claims(tmp_path):
+    db_path = _seed_path_graph(tmp_path)
+    with get_connection(db_path) as connection:
+        connection.execute("DELETE FROM order_role_edge")
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_HISTORY_MATCHED', 'history.csv', 'tester')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO relationship_claim (
+                claim_id,
+                from_entity_id,
+                to_entity_id,
+                candidate_relation_type,
+                relation_status,
+                confidence_level,
+                confidence_score,
+                order_count,
+                total_teu,
+                recommendation_reason,
+                run_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "CLM_HISTORY_MATCHED",
+                "ENT_A",
+                "ENT_C",
+                "trading_partner_candidate",
+                "history_matched",
+                "high",
+                0.91,
+                4,
+                12.5,
+                "history reuse matched",
+                "RUN_HISTORY_MATCHED",
+            ),
+        )
+
+    result = find_entity_paths("ENT_A", "ENT_C", db_path=db_path, max_depth=1)
+
+    assert result["path_count"] == 1
+    edge = result["paths"][0]["edges"][0]
+    assert edge["record_type"] == "relationship_claim"
+    assert edge["status"] == "history_matched"
+
+
 def test_find_entity_paths_raises_for_unknown_endpoint(tmp_path):
     db_path = _seed_path_graph(tmp_path)
 

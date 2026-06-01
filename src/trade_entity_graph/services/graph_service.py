@@ -7,7 +7,12 @@ from typing import Any
 
 from trade_entity_graph.db.connection import get_connection
 
-PENDING_CLAIM_STATUSES = ("candidate", "pending_verify", "history_conflict")
+PENDING_CLAIM_STATUSES = (
+    "candidate",
+    "pending_verify",
+    "history_matched",
+    "history_conflict",
+)
 
 
 def _entity_node(row: Any, *, center_entity_id: str) -> dict[str, Any]:
@@ -178,6 +183,8 @@ def _edge_priority(edge: dict[str, Any]) -> float:
             return 1.0
         return 0.9
     if edge["record_type"] == "relationship_claim":
+        if edge["status"] == "history_matched":
+            return 0.8
         return 0.7
     return 0.5
 
