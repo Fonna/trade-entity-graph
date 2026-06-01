@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from trade_entity_graph.api.routers import entities, exports, imports, relationships, reviews
+from trade_entity_graph.api.routers import (
+    entities,
+    exports,
+    imports,
+    paths,
+    relationships,
+    reviews,
+)
 from trade_entity_graph.config import get_settings
 
 
@@ -23,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(relationships.router)
     app.include_router(reviews.router)
     app.include_router(exports.router)
+    app.include_router(paths.router)
 
     return app
 

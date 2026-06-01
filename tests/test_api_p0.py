@@ -100,6 +100,115 @@ def _raw_request(app, method: str, path: str, *, query=None, json_body=None):
     return asyncio.run(_call())
 
 
+def _seed_api_path_graph(tmp_path):
+    db_path = initialize_database(tmp_path / "api-paths.db")
+    with get_connection(db_path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type, tags)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                ("ENT_A", "Alpha Trading", "customer", "[]"),
+                ("ENT_B", "Beta Factory", "shipper", "[]"),
+                ("ENT_C", "Gamma Buyer", "consignee", "[]"),
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO order_role_edge (
+                edge_id,
+                order_id,
+                from_entity_id,
+                from_role,
+                to_entity_id,
+                to_role,
+                role_pair_type,
+                teu
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "ORE_API_AB",
+                    "ORD_API_1",
+                    "ENT_A",
+                    "customer",
+                    "ENT_B",
+                    "shipper",
+                    "customer_to_shipper",
+                    2.0,
+                ),
+                (
+                    "ORE_API_BC",
+                    "ORD_API_2",
+                    "ENT_B",
+                    "shipper",
+                    "ENT_C",
+                    "consignee",
+                    "shipper_to_consignee",
+                    3.0,
+                ),
+            ],
+        )
+        connection.commit()
+    return db_path
+
+
+def test_api_ego_graph_accepts_depth_and_max_nodes(tmp_path, monkeypatch) -> None:
+    db_path = _seed_api_path_graph(tmp_path)
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(),
+        "GET",
+        "/entities/ENT_A/ego-graph",
+        query={"depth": 2, "max_nodes": 10},
+    )
+
+    assert status == 200
+    assert payload["summary"]["depth"] == 2
+    assert payload["summary"]["max_nodes"] == 10
+    assert {node["id"] for node in payload["nodes"]} == {"ENT_A", "ENT_B", "ENT_C"}
+
+
+def test_api_paths_returns_entity_path(tmp_path, monkeypatch) -> None:
+    db_path = _seed_api_path_graph(tmp_path)
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(),
+        "GET",
+        "/paths",
+        query={"from_entity_id": "ENT_A", "to_entity_id": "ENT_C"},
+    )
+
+    assert status == 200
+    assert payload["path_count"] == 1
+    assert payload["paths"][0]["node_ids"] == ["ENT_A", "ENT_B", "ENT_C"]
+
+
+def test_api_paths_returns_404_for_unknown_entity(tmp_path, monkeypatch) -> None:
+    db_path = _seed_api_path_graph(tmp_path)
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(),
+        "GET",
+        "/paths",
+        query={"from_entity_id": "ENT_A", "to_entity_id": "NO_SUCH"},
+    )
+
+    assert status == 404
+    assert "Unknown entity" in payload["detail"]
+
+
 def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "api.db"
     entities_path = tmp_path / "entities.csv"

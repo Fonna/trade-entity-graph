@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from trade_entity_graph.services.entity_service import get_entity_detail, search_entities
 from trade_entity_graph.services.graph_service import get_ego_graph
@@ -32,5 +32,15 @@ def get_neighbors_endpoint(entity_id: str) -> dict[str, object]:
 
 
 @router.get("/{entity_id}/ego-graph")
-def get_ego_graph_endpoint(entity_id: str) -> dict[str, object]:
-    return get_ego_graph(entity_id)
+def get_ego_graph_endpoint(
+    entity_id: str,
+    depth: int = Query(1, ge=1, le=2),
+    max_nodes: int = Query(50, ge=1, le=200),
+    include_rejected: bool = False,
+) -> dict[str, object]:
+    return get_ego_graph(
+        entity_id,
+        depth=depth,
+        max_nodes=max_nodes,
+        include_rejected=include_rejected,
+    )
