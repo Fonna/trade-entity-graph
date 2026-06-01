@@ -209,6 +209,101 @@ def test_api_paths_returns_404_for_unknown_entity(tmp_path, monkeypatch) -> None
     assert "Unknown entity" in payload["detail"]
 
 
+def test_api_graph_and_paths_reject_invalid_query_bounds(tmp_path, monkeypatch) -> None:
+    db_path = _seed_api_path_graph(tmp_path)
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+    invalid_requests = [
+        ("GET", "/entities/ENT_A/ego-graph", {"depth": 3}),
+        ("GET", "/entities/ENT_A/ego-graph", {"max_nodes": 0}),
+        ("GET", "/paths", {"from_entity_id": "ENT_A", "to_entity_id": "ENT_C", "max_depth": 0}),
+        ("GET", "/paths", {"from_entity_id": "ENT_A", "to_entity_id": "ENT_C", "max_paths": 0}),
+    ]
+
+    for method, path, query in invalid_requests:
+        status, payload = _request(app, method, path, query=query)
+        assert status == 422
+        assert payload["detail"]
+
+
+def test_api_paths_returns_empty_result_when_no_path_exists(tmp_path, monkeypatch) -> None:
+    db_path = _seed_api_path_graph(tmp_path)
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO entity (entity_id, canonical_name, entity_type, tags)
+            VALUES ('ENT_D', 'Delta Isolated', 'company', '[]')
+            """
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(),
+        "GET",
+        "/paths",
+        query={"from_entity_id": "ENT_A", "to_entity_id": "ENT_D"},
+    )
+
+    assert status == 200
+    assert payload["path_count"] == 0
+    assert payload["paths"] == []
+
+
+def test_api_paths_include_rejected_controls_visibility(tmp_path, monkeypatch) -> None:
+    db_path = _seed_api_path_graph(tmp_path)
+    monkeypatch.setenv("TEG_DATABASE_PATH", str(db_path))
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO curated_relationship (
+                relationship_id,
+                from_entity_id,
+                to_entity_id,
+                relation_type,
+                relation_status,
+                confidence_level,
+                confidence_score
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("REL_API_AC_REJECTED", "ENT_A", "ENT_C", "partner", "rejected", "low", 0.2),
+        )
+        connection.commit()
+
+    from trade_entity_graph.api.main import create_app
+
+    app = create_app()
+    default_status, default_payload = _request(
+        app,
+        "GET",
+        "/paths",
+        query={"from_entity_id": "ENT_A", "to_entity_id": "ENT_C", "max_depth": 1},
+    )
+    rejected_status, rejected_payload = _request(
+        app,
+        "GET",
+        "/paths",
+        query={
+            "from_entity_id": "ENT_A",
+            "to_entity_id": "ENT_C",
+            "max_depth": 1,
+            "include_rejected": True,
+        },
+    )
+
+    assert default_status == 200
+    assert default_payload["path_count"] == 0
+    assert rejected_status == 200
+    assert rejected_payload["path_count"] == 1
+    assert rejected_payload["paths"][0]["edges"][0]["status"] == "rejected"
+
+
 def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "api.db"
     entities_path = tmp_path / "entities.csv"
