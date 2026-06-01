@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import re
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,14 @@ def _rows_to_dicts(rows: list[Any]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def _source_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _import_error_order_by() -> str:
     return """
         CASE severity WHEN 'blocking' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
@@ -77,6 +87,68 @@ def _ensure_import_batch_exists(connection: Any, run_id: str) -> None:
     ).fetchone()
     if row is None:
         raise ValueError(f"Unknown import batch: {run_id}")
+
+
+def find_duplicate_import(
+    sources: list[tuple[str, Path]],
+    *,
+    db_path: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Return the latest import batch with the same source-role file hashes."""
+
+    if not sources:
+        return None
+
+    try:
+        source_hash_by_role = {
+            source_role: _source_sha256(Path(source_path))
+            for source_role, source_path in sources
+        }
+    except OSError:
+        return None
+    source_roles = set(source_hash_by_role)
+
+    try:
+        with get_connection(db_path) as connection:
+            batch_rows = connection.execute(
+                """
+                SELECT b.*
+                FROM import_batch b
+                JOIN import_source_file f ON f.run_id = b.run_id
+                GROUP BY b.run_id
+                ORDER BY b.imported_at DESC, b.run_id DESC
+                """
+            ).fetchall()
+            for batch in batch_rows:
+                file_rows = connection.execute(
+                    """
+                    SELECT *
+                    FROM import_source_file
+                    WHERE run_id = ?
+                    ORDER BY source_role, file_name
+                    """,
+                    (batch["run_id"],),
+                ).fetchall()
+                files_by_role = {row["source_role"]: dict(row) for row in file_rows}
+                if set(files_by_role) != source_roles:
+                    continue
+                if all(
+                    files_by_role[source_role]["sha256"] == source_hash
+                    for source_role, source_hash in source_hash_by_role.items()
+                ):
+                    return {
+                        "run_id": batch["run_id"],
+                        "source_file": batch["source_file"],
+                        "source_path": batch["source_path"],
+                        "imported_by": batch["imported_by"],
+                        "imported_at": batch["imported_at"],
+                        "source_files": list(files_by_role.values()),
+                    }
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower():
+            raise
+
+    return None
 
 
 def _quality_summary(connection: Any, run_id: str) -> dict[str, Any]:

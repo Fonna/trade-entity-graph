@@ -19,6 +19,7 @@ from trade_entity_graph.services.graph_service import get_ego_graph
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
 from trade_entity_graph.services.import_quality_service import (
     export_import_errors,
+    find_duplicate_import,
     get_import_batch_detail,
     list_import_batches,
     list_import_errors,
@@ -900,7 +901,28 @@ def render_import_tab() -> None:
     orders_path = st.text_input("订单明细文件路径")
     relationships_path = st.text_input("已有关系候选文件路径")
     imported_by = st.text_input("导入人", value="local_user")
+    confirm_duplicate_import = st.checkbox("确认重复导入")
     if st.button("开始导入"):
+        source_files = [
+            (source_role, Path(source_path))
+            for source_role, source_path in (
+                ("entities", entities_path),
+                ("orders", orders_path),
+                ("relationships", relationships_path),
+            )
+            if source_path
+        ]
+        duplicate_import = find_duplicate_import(source_files)
+        if duplicate_import and not confirm_duplicate_import:
+            st.warning(
+                "检测到重复导入："
+                f"run_id={duplicate_import.get('run_id')}, "
+                f"imported_at={duplicate_import.get('imported_at')}, "
+                f"imported_by={duplicate_import.get('imported_by')}。"
+                "如需继续，请勾选确认重复导入。"
+            )
+            _render_import_quality_history()
+            return
         try:
             result = run_import(
                 ImportInputs(

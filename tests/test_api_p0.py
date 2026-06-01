@@ -1138,6 +1138,10 @@ def test_import_endpoint_default_preserves_imported_claims_without_edges(
         lambda inputs: ImportResult(),
     )
     monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.find_duplicate_import",
+        lambda sources: None,
+    )
+    monkeypatch.setattr(
         "trade_entity_graph.api.routers.imports.generate_order_role_edges",
         lambda *, run_id: {"edge_count": 0},
     )
@@ -1465,6 +1469,10 @@ def test_import_run_endpoint_includes_quality_summary(monkeypatch) -> None:
         lambda inputs: ImportResult(),
     )
     monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.find_duplicate_import",
+        lambda sources: None,
+    )
+    monkeypatch.setattr(
         "trade_entity_graph.api.routers.imports.generate_order_role_edges",
         lambda *, run_id: {"edge_count": 0},
     )
@@ -1478,6 +1486,101 @@ def test_import_run_endpoint_includes_quality_summary(monkeypatch) -> None:
     }
     assert payload["error_count"] == 1
     assert payload["warning_count"] == 0
+
+
+def test_import_run_endpoint_returns_duplicate_import_warning(monkeypatch) -> None:
+    class ImportResult:
+        run_id = "RUN_NEW"
+        entity_count = 0
+        alias_count = 0
+        evidence_count = 0
+        claim_count = 0
+        skipped_rows = []
+        archived_files = []
+        import_errors = []
+        error_count = 0
+        warning_count = 0
+        quality_summary = {}
+
+    checked_sources = []
+
+    def fake_find_duplicate_import(sources):
+        checked_sources.extend((role, path.name) for role, path in sources)
+        return {
+            "run_id": "RUN_PREVIOUS",
+            "imported_at": "2026-05-31 01:02:03",
+            "imported_by": "tester",
+            "source_files": [
+                {"source_role": "entities", "sha256": "a" * 64},
+                {"source_role": "orders", "sha256": "b" * 64},
+            ],
+        }
+
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.find_duplicate_import",
+        fake_find_duplicate_import,
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.run_import",
+        lambda inputs: ImportResult(),
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.generate_order_role_edges",
+        lambda *, run_id: {"edge_count": 0},
+    )
+
+    payload = run_import_endpoint(
+        ImportRunRequest(
+            entities_path="entities.csv",
+            orders_path="orders.csv",
+        )
+    )
+
+    assert checked_sources == [("entities", "entities.csv"), ("orders", "orders.csv")]
+    assert payload["run_id"] == "RUN_NEW"
+    assert payload["duplicate_import_warning"] is True
+    assert payload["duplicate_import_match"]["run_id"] == "RUN_PREVIOUS"
+
+
+def test_import_duplicate_check_endpoint_returns_warning_without_running_import(
+    monkeypatch,
+) -> None:
+    checked_sources = []
+
+    def fake_find_duplicate_import(sources):
+        checked_sources.extend((role, path.name) for role, path in sources)
+        return {
+            "run_id": "RUN_PREVIOUS",
+            "imported_at": "2026-05-31 01:02:03",
+            "imported_by": "tester",
+            "source_files": [{"source_role": "orders", "sha256": "b" * 64}],
+        }
+
+    def fail_if_imported(_inputs):
+        raise AssertionError("duplicate check must not run import")
+
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.find_duplicate_import",
+        fake_find_duplicate_import,
+    )
+    monkeypatch.setattr(
+        "trade_entity_graph.api.routers.imports.run_import",
+        fail_if_imported,
+    )
+
+    from trade_entity_graph.api.main import create_app
+
+    status, payload = _request(
+        create_app(),
+        "POST",
+        "/imports/duplicate-check",
+        json_body={"orders_path": "orders.csv"},
+    )
+
+    assert status == 200
+    assert checked_sources == [("orders", "orders.csv")]
+    assert payload["duplicate_import_warning"] is True
+    assert payload["duplicate_import_match"]["run_id"] == "RUN_PREVIOUS"
 
 
 def test_import_run_api_returns_400_for_missing_file(tmp_path, monkeypatch) -> None:

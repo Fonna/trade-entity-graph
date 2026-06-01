@@ -1,6 +1,8 @@
+import hashlib
 from pathlib import Path
 
 from trade_entity_graph.db.connection import get_connection, initialize_database
+from trade_entity_graph.services import import_quality_service
 from trade_entity_graph.services.import_quality_service import (
     ERROR_EXPORT_COLUMNS,
     export_import_errors,
@@ -124,6 +126,10 @@ def _seed_import_quality_fixture(db_path: Path) -> None:
             """
         )
         connection.commit()
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _seed_many_import_errors(db_path: Path, count: int = 1005) -> None:
@@ -267,3 +273,124 @@ def test_list_import_errors_rejects_unknown_batch(tmp_path: Path) -> None:
         assert "Unknown import batch: NO_SUCH" in str(exc)
     else:
         raise AssertionError("list_import_errors should reject unknown import batches")
+
+
+def test_find_duplicate_import_matches_exact_source_role_hash_set(tmp_path: Path) -> None:
+    db_path = tmp_path / "quality.db"
+    entities_path = tmp_path / "entities.csv"
+    orders_path = tmp_path / "orders.csv"
+    entities_path.write_text("canonical_name\nACME\n", encoding="utf-8")
+    orders_path.write_text("order_id\nSO-1\n", encoding="utf-8")
+
+    initialize_database(db_path)
+    find_duplicate_import = getattr(import_quality_service, "find_duplicate_import", None)
+    assert callable(find_duplicate_import)
+
+    first_result = find_duplicate_import(
+        [("entities", entities_path), ("orders", orders_path)],
+        db_path=db_path,
+    )
+    assert first_result is None
+
+    with get_connection(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO import_batch (run_id, source_file, imported_by)
+            VALUES ('RUN_DUP', 'orders.csv', 'tester')
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO import_source_file (
+                source_file_id, run_id, source_role, original_path, archived_path,
+                file_name, file_size_bytes, sha256
+            )
+            VALUES (?, 'RUN_DUP', ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "SRC_ENT",
+                    "entities",
+                    str(entities_path),
+                    "archive/entities.csv",
+                    "entities.csv",
+                    entities_path.stat().st_size,
+                    "not-the-real-hash",
+                ),
+                (
+                    "SRC_ORD",
+                    "orders",
+                    str(orders_path),
+                    "archive/orders.csv",
+                    "orders.csv",
+                    orders_path.stat().st_size,
+                    "not-the-real-hash",
+                ),
+            ],
+        )
+        connection.commit()
+
+    mismatch_result = find_duplicate_import(
+        [("entities", entities_path), ("orders", orders_path)],
+        db_path=db_path,
+    )
+    assert mismatch_result is None
+
+    with get_connection(db_path) as connection:
+        connection.execute("DELETE FROM import_source_file WHERE run_id = 'RUN_DUP'")
+        archived_files = [
+            ("SRC_ENT", "entities", entities_path),
+            ("SRC_ORD", "orders", orders_path),
+        ]
+        connection.executemany(
+            """
+            INSERT INTO import_source_file (
+                source_file_id, run_id, source_role, original_path, archived_path,
+                file_name, file_size_bytes, sha256
+            )
+            VALUES (?, 'RUN_DUP', ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    source_file_id,
+                    source_role,
+                    str(path),
+                    f"archive/{path.name}",
+                    path.name,
+                    path.stat().st_size,
+                    _sha256(path),
+                )
+                for source_file_id, source_role, path in archived_files
+            ],
+        )
+        connection.commit()
+
+    duplicate_result = find_duplicate_import(
+        [("entities", entities_path), ("orders", orders_path)],
+        db_path=db_path,
+    )
+    assert duplicate_result is not None
+    assert duplicate_result["run_id"] == "RUN_DUP"
+    assert duplicate_result["imported_by"] == "tester"
+    assert {item["source_role"] for item in duplicate_result["source_files"]} == {
+        "entities",
+        "orders",
+    }
+
+    role_subset_result = find_duplicate_import([("orders", orders_path)], db_path=db_path)
+    assert role_subset_result is None
+
+
+def test_find_duplicate_import_returns_none_before_database_initialization(
+    tmp_path: Path,
+) -> None:
+    orders_path = tmp_path / "orders.csv"
+    db_path = tmp_path / "not_initialized.db"
+    orders_path.write_text("order_id\nSO-1\n", encoding="utf-8")
+
+    result = import_quality_service.find_duplicate_import(
+        [("orders", orders_path)],
+        db_path=db_path,
+    )
+
+    assert result is None

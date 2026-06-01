@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -461,6 +462,9 @@ def test_import_tab_applies_history_reuse_after_generated_claims(monkeypatch) ->
         def button(self, *_args, **_kwargs) -> bool:
             return True
 
+        def checkbox(self, *_args, **_kwargs) -> bool:
+            return False
+
         def success(self, *_args, **_kwargs) -> None:
             return None
 
@@ -561,9 +565,14 @@ class ImportQualityFakeStreamlit:
         *,
         selected_run_id: str = "",
         buttons: dict[str, bool] | None = None,
+        checkboxes: dict[str, bool] | None = None,
+        text_inputs: list[str] | None = None,
     ) -> None:
         self.selected_run_id = selected_run_id
         self.buttons = buttons or {}
+        self.checkboxes = checkboxes or {}
+        self.text_inputs = text_inputs
+        self.text_input_calls = 0
         self.errors: list[str] = []
         self.infos: list[str] = []
         self.successes: list[str] = []
@@ -576,12 +585,22 @@ class ImportQualityFakeStreamlit:
         return None
 
     def text_input(self, label, value="", **_kwargs) -> str:
+        if self.text_inputs is not None:
+            response = self.text_inputs[self.text_input_calls]
+            self.text_input_calls += 1
+            return response
         if "run_id" in str(label):
             return self.selected_run_id
         return value
 
     def button(self, label, **_kwargs) -> bool:
         return self.buttons.get(str(label), False)
+
+    def checkbox(self, label, **_kwargs) -> bool:
+        label_text = str(label)
+        return any(
+            checked for expected, checked in self.checkboxes.items() if expected in label_text
+        )
 
     def success(self, message, **_kwargs) -> None:
         self.successes.append(str(message))
@@ -606,6 +625,127 @@ class ImportQualityFakeStreamlit:
 
     def download_button(self, label, **kwargs) -> None:
         self.downloads.append({"label": label, **kwargs})
+
+
+def test_import_tab_warns_and_skips_duplicate_import_without_confirmation(
+    monkeypatch,
+) -> None:
+    calls: list[object] = []
+    fake_st = ImportQualityFakeStreamlit(
+        buttons={"\u5f00\u59cb\u5bfc\u5165": True},
+        checkboxes={"\u786e\u8ba4\u91cd\u590d\u5bfc\u5165": False},
+        text_inputs=[
+            "data/entities.csv",
+            "data/orders.csv",
+            "",
+            "local_user",
+            "",
+        ],
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+
+    def fake_find_duplicate_import(sources):
+        calls.append(("duplicate", sources))
+        return {
+            "run_id": "RUN_DUP",
+            "imported_at": "2026-05-31T09:00:00Z",
+            "imported_by": "tester",
+            "source_files": [],
+        }
+
+    def fail_if_called(*_args, **_kwargs):
+        calls.append("unexpected")
+        raise AssertionError("duplicate imports should require explicit confirmation")
+
+    monkeypatch.setattr(
+        streamlit_app,
+        "find_duplicate_import",
+        fake_find_duplicate_import,
+        raising=False,
+    )
+    monkeypatch.setattr(streamlit_app, "run_import", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "generate_order_role_edges", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "aggregate_relationship_claims", fail_if_called)
+    monkeypatch.setattr(streamlit_app, "apply_history_reuse_to_claims", fail_if_called)
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_batches",
+        lambda **_kwargs: calls.append("history") or {"items": [{"run_id": "RUN_DUP"}]},
+    )
+
+    streamlit_app.render_import_tab()
+
+    assert calls == [
+        (
+            "duplicate",
+            [("entities", Path("data/entities.csv")), ("orders", Path("data/orders.csv"))],
+        ),
+        "history",
+    ]
+    assert len(fake_st.warnings) == 1
+    assert "RUN_DUP" in fake_st.warnings[0]
+    assert "2026-05-31T09:00:00Z" in fake_st.warnings[0]
+    assert "tester" in fake_st.warnings[0]
+    assert len(fake_st.frames) == 1
+
+
+def test_import_tab_allows_duplicate_import_with_confirmation(monkeypatch) -> None:
+    calls: list[str] = []
+    fake_st = ImportQualityFakeStreamlit(
+        buttons={"\u5f00\u59cb\u5bfc\u5165": True},
+        checkboxes={"\u786e\u8ba4\u91cd\u590d\u5bfc\u5165": True},
+        text_inputs=[
+            "data/entities.csv",
+            "data/orders.csv",
+            "data/relationships.csv",
+            "local_user",
+            "",
+        ],
+    )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "find_duplicate_import",
+        lambda _sources: {
+            "run_id": "RUN_DUP",
+            "imported_at": "2026-05-31T09:00:00Z",
+            "imported_by": "tester",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(streamlit_app, "run_import", lambda _inputs: _successful_import_result())
+    monkeypatch.setattr(
+        streamlit_app,
+        "generate_order_role_edges",
+        lambda *, run_id: calls.append(f"generate:{run_id}") or {"edge_count": 1},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "aggregate_relationship_claims",
+        lambda *, run_id: calls.append(f"aggregate:{run_id}") or {"claim_count": 1},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "apply_history_reuse_to_claims",
+        lambda *, run_id: calls.append(f"history_reuse:{run_id}")
+        or {"history_matched": 0, "history_conflict": 0, "unchanged": 1},
+    )
+    monkeypatch.setattr(
+        streamlit_app,
+        "list_import_batches",
+        lambda **_kwargs: calls.append("history") or {"items": []},
+    )
+
+    streamlit_app.render_import_tab()
+
+    assert calls == [
+        "generate:RUN_STREAMLIT_IMPORT",
+        "aggregate:RUN_STREAMLIT_IMPORT",
+        "history_reuse:RUN_STREAMLIT_IMPORT",
+        "history",
+    ]
+    assert len(fake_st.successes) == 1
+    assert fake_st.json_payloads[0]["run_id"] == "RUN_STREAMLIT_IMPORT"
 
 
 def test_import_tab_reports_run_import_failure_and_skips_derived_steps(

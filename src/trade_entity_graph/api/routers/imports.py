@@ -12,6 +12,7 @@ from trade_entity_graph.importers.pipeline import run_import
 from trade_entity_graph.services import import_quality_service as _import_quality_service
 from trade_entity_graph.services.history_reuse_service import apply_history_reuse_to_claims
 from trade_entity_graph.services.import_quality_service import (
+    find_duplicate_import,
     get_import_batch_detail,
     get_import_quality_report,
     import_errors_export_filename,
@@ -53,6 +54,25 @@ def _import_failure_detail(exc: Exception, inputs: ImportInputs) -> str:
     path_text = f" for {', '.join(paths)}" if paths else ""
     exc_text = str(exc) or exc.__class__.__name__
     return f"Import file failure{path_text}: {exc_text}"
+
+
+def _input_sources(inputs: ImportInputs) -> list[tuple[str, Path]]:
+    sources: list[tuple[str, Path]] = []
+    if inputs.entities_path is not None:
+        sources.append(("entities", Path(inputs.entities_path)))
+    if inputs.orders_path is not None:
+        sources.append(("orders", Path(inputs.orders_path)))
+    if inputs.relationships_path is not None:
+        sources.append(("relationships", Path(inputs.relationships_path)))
+    return sources
+
+
+def _duplicate_import_payload(inputs: ImportInputs) -> dict[str, object]:
+    duplicate_import_match = find_duplicate_import(_input_sources(inputs))
+    return {
+        "duplicate_import_warning": duplicate_import_match is not None,
+        "duplicate_import_match": duplicate_import_match,
+    }
 
 
 @router.get("")
@@ -115,6 +135,19 @@ def get_import_quality_report_endpoint(run_id: str) -> dict[str, object]:
         raise _not_found_from_value_error(exc) from exc
 
 
+@router.post("/duplicate-check")
+def duplicate_import_check_endpoint(request: ImportRunRequest) -> dict[str, object]:
+    inputs = ImportInputs(
+        orders_path=Path(request.orders_path) if request.orders_path else None,
+        entities_path=Path(request.entities_path) if request.entities_path else None,
+        relationships_path=(
+            Path(request.relationships_path) if request.relationships_path else None
+        ),
+        imported_by=request.imported_by,
+    )
+    return _duplicate_import_payload(inputs)
+
+
 @router.post("/run")
 def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
     inputs = ImportInputs(
@@ -126,6 +159,7 @@ def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
         imported_by=request.imported_by,
     )
     try:
+        duplicate_import = _duplicate_import_payload(inputs)
         result = run_import(inputs)
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise HTTPException(
@@ -155,4 +189,5 @@ def run_import_endpoint(request: ImportRunRequest) -> dict[str, object]:
         "warning_count": getattr(result, "warning_count", 0),
         "import_errors": getattr(result, "import_errors", []),
         "quality_summary": getattr(result, "quality_summary", {}),
+        **duplicate_import,
     }
