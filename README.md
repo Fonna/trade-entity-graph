@@ -24,7 +24,7 @@
 - 建立关系候选库；
 - 提供人工审核、确认、否定、修改和人工新增关系入口；
 - 将人工确认结果写入最终关系库；
-- 支持企业搜索和中心企业一跳关系图谱展示；
+- 支持企业搜索、中心企业一跳/二跳关系图谱展示和两企业路径查询；
 - 支持点击关系查看订单证据和人工判断；
 - 支持导出中心企业关系明细。
 
@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## 快速开始
 
-当前仓库已完成 M0/M1 基线，并具备 M2-M9 P0/P1 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳图谱查询、FastAPI 接口、中文 Streamlit 工作台、导出能力、演示验收数据包，以及 M9 真实数据试运行与导入质量闭环，包括字段映射配置、行级导入异常记录、导入批次查询、质量报告和异常 CSV 导出。
+当前仓库已完成 M0/M1 基线，并具备 M2-M10 P0/P1 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳/二跳图谱查询、两企业路径查询、FastAPI 接口、中文 Streamlit 工作台、导出能力、演示验收数据包，以及 M9 真实数据试运行与导入质量闭环，包括字段映射配置、行级导入异常记录、导入批次查询、质量报告和异常 CSV 导出。M10 新增深度受限的二跳展开、`GET /paths` 和图谱页路径查询。
 
 本项目所有 Python 环境、依赖安装和命令运行统一使用 `uv`，避免污染全局 Python 环境。
 
@@ -111,6 +111,12 @@ uv run pytest
 M9 面向真实 Excel/CSV 试运行：默认字段映射可识别常见中文/英文别名，支持通过配置适配不同来源文件。导入过程会保留有效行，并将字段缺失、必填值为空、TEU 格式错误、未知企业引用、无效关系配对等问题写入 `import_error`，便于追溯和复核。
 
 导入批次和质量结果可通过 API 查询：`GET /imports`、`GET /imports/{run_id}`、`GET /imports/{run_id}/errors`、`GET /imports/{run_id}/quality-report`。Streamlit 数据导入页展示最近批次、质量摘要、异常明细，并支持导出异常 CSV。
+
+### M10 二跳图谱与两企业路径查询
+
+M10 将图谱服务扩展为受控的局部探索：`GET /entities/{entity_id}/ego-graph?depth=2&max_nodes=50` 可在默认一跳兼容的基础上展开二跳，并通过 `max_nodes` 限制节点数量；默认仍隐藏 `rejected` 关系，可用 `include_rejected=true` 显示。
+
+两企业路径查询通过 `GET /paths?from_entity_id=<A>&to_entity_id=<C>&max_depth=3&max_paths=5` 返回可解释路径、路径节点、边来源、状态和分数。Streamlit 关系图谱页支持设置 `Graph depth` / `Max nodes`，并在“两企业路径查询”区域输入起点、终点、最大深度和路径数，表格展示 `step/from_name/to_name/relation_type/record_type/status/evidence`；未知主体或无路径会给出可见提示。
 
 ## 数据流
 
@@ -162,14 +168,14 @@ flowchart TD
 
 ## 当前开发状态
 
-截至 2026-05-28，当前分支已包含 M2-M9 P0/P1 闭环、原始文件归档能力、历史关系复用、全局待审核队列、中文 Streamlit 工作台、演示验收数据包，以及 M9 真实数据试运行与导入质量闭环：字段映射配置、行级导入异常记录、导入批次查询、质量报告和异常 CSV 导出。最近一次验证：
+截至 2026-06-01，当前分支已包含 M2-M10 P0/P1 闭环、原始文件归档能力、历史关系复用、全局待审核队列、中文 Streamlit 工作台、演示验收数据包、M9 真实数据试运行与导入质量闭环，以及 M10 二跳图谱和两企业路径查询能力。最近一次验证：
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-验证结果：`164 passed`，ruff `All checks passed!`。
+验证结果：`190 passed`，ruff `All checks passed!`。
 
 ## 推荐开发顺序
 
@@ -183,6 +189,7 @@ uv --cache-dir .uv-cache run ruff check .
 8. M7：Streamlit MVP 页面与待审核队列工作台。
 9. M8：人工审核写回、审计和验收演示。
 10. M9：真实数据试运行、导入质量报告和异常闭环。
+11. M10：二跳图谱展开、`GET /paths` 两企业路径查询和 Streamlit 路径查询工作流。
 
 ## 远程仓库
 

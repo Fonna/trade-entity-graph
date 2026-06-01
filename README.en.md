@@ -24,7 +24,7 @@ Build a reusable, auditable, evidence-backed, human-reviewable, and graph-visual
 - Build a relationship candidate table;
 - Provide review actions to confirm, reject, edit, and manually create relationships;
 - Write confirmed decisions into the curated relationship table;
-- Support entity search and one-hop ego graph visualization;
+- Support entity search, bounded one-hop/two-hop ego graph visualization, and two-entity path query;
 - Show order evidence and manual decisions when a relationship is selected;
 - Export relationship details for a center entity.
 
@@ -68,7 +68,7 @@ trade-entity-graph/
 
 ## Quick Start
 
-The repository has completed the M0/M1 baseline and now includes the M2-M9 P0/P1 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop graph query, FastAPI endpoints, Chinese Streamlit workbench, export support, demo acceptance data, and the M9 real-data import QA loop with configurable field mapping, row-level import errors, import batch queries, quality reports, and import-error CSV export.
+The repository has completed the M0/M1 baseline and now includes the M2-M10 P0/P1 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop/two-hop graph query, two-entity path query, FastAPI endpoints, Chinese Streamlit workbench, export support, demo acceptance data, and the M9 real-data import QA loop with configurable field mapping, row-level import errors, import batch queries, quality reports, and import-error CSV export. M10 adds bounded two-hop expansion, `GET /paths`, and a Streamlit path-query workflow.
 
 All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
 
@@ -111,6 +111,12 @@ During import, the system copies original Excel/CSV files to `data/raw/imports/<
 M9 targets dry runs with real Excel/CSV files. The default field mapping recognizes common Chinese and English aliases and can be configured for source-specific column names. Import validation keeps valid rows while writing missing fields, blank required values, TEU format errors, unknown entity references, and invalid relationship pairs to `import_error`.
 
 Import batches and quality results are available through `GET /imports`, `GET /imports/{run_id}`, `GET /imports/{run_id}/errors`, and `GET /imports/{run_id}/quality-report`. The Streamlit data import page shows recent batches, quality summaries, row-level errors, and import-error CSV export.
+
+### M10 Two-Hop Graph and Two-Entity Path Query
+
+M10 expands graph exploration while keeping it bounded: `GET /entities/{entity_id}/ego-graph?depth=2&max_nodes=50` preserves the default one-hop behavior, can expand to depth two, and limits returned nodes with `max_nodes`. Rejected relationships remain hidden by default and can be included with `include_rejected=true`.
+
+Two-entity path query is available through `GET /paths?from_entity_id=<A>&to_entity_id=<C>&max_depth=3&max_paths=5`. The response includes explainable paths, path nodes, edge provenance, statuses, and scores. In Streamlit, the graph tab now has `Graph depth` / `Max nodes` controls and a two-entity path-query section that renders `step/from_name/to_name/relation_type/record_type/status/evidence`; unknown entities and no-path results show visible prompts.
 
 ## Data Flow
 
@@ -162,14 +168,14 @@ flowchart TD
 
 ## Current Development Status
 
-As of 2026-05-28, the current branch includes the M2-M9 P0/P1 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, demo acceptance data, and the M9 real-data import QA loop with configurable field mapping, row-level import errors, import batch queries, quality reports, and import-error CSV export. Latest verification:
+As of 2026-06-01, the current branch includes the M2-M10 P0/P1 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, demo acceptance data, the M9 real-data import QA loop, and the M10 two-hop graph and two-entity path-query workflow. Latest verification:
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-Result: `164 passed`, ruff `All checks passed!`.
+Result: `190 passed`, ruff `All checks passed!`.
 
 ## Recommended Development Order
 
@@ -183,6 +189,7 @@ Result: `164 passed`, ruff `All checks passed!`.
 8. M7: Streamlit MVP pages and the review queue workbench.
 9. M8: Review persistence, audit logs, acceptance demo.
 10. M9: Real-data dry runs, import quality reports, and import-error workflow.
+11. M10: Two-hop graph expansion, `GET /paths` two-entity path query, and Streamlit path-query workflow.
 
 ## Remote Repository
 

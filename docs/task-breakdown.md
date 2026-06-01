@@ -27,6 +27,7 @@ MVP 第一版只承诺 P0 闭环：
 | M7 | Streamlit MVP 页面 | 提供导入、搜索、图谱、详情、待审核队列、审核、导出原型页面 | P0 | 用户可完成演示脚本中的核心路径 |
 | M8 | 验收与演示数据 | 准备样例数据、导出结果、测试清单和演示流程 | P0 | PRD 功能验收与业务验收 P0 项通过 |
 | M9 | 真实数据试运行与导入质量闭环 | 支持真实文件字段映射、行级异常沉淀、批次查询、质量报告和异常导出 | P1 | 真实脏数据可部分导入，异常可追溯、可查询、可导出 |
+| M10 | 二跳图谱与两企业路径查询 | 支持受控二跳展开、`GET /paths` 和 Streamlit 路径查询工作流 | P1 | 可限制深度/节点/路径数，返回可解释路径并保留默认隐藏 rejected 行为 |
 
 ## 3. 数据库任务
 
@@ -93,8 +94,8 @@ MVP 第一版只承诺 P0 闭环：
 | GRAPH-03 | 支持边类型过滤 | P0 | 可切换订单证据边、候选关系、最终关系 |
 | GRAPH-04 | 支持状态过滤 | P0 | 默认隐藏 `rejected`，可查看历史否定关系 |
 | GRAPH-05 | 返回图谱摘要 | P1 | 返回节点数、边数、订单数和 TEU |
-| GRAPH-06 | 获取中心企业二跳关系 | P1 | 按需展开并限制节点数 |
-| GRAPH-07 | 查询 A 到 C 路径 | P1 | 限制深度后返回路径节点和边 |
+| GRAPH-06 | 获取中心企业二跳关系 | P1 | `depth=2` 展开并通过 `max_nodes` 限制节点数 |
+| GRAPH-07 | 查询 A 到 C 路径 | P1 | 通过 `max_depth` / `max_paths` 返回可解释路径节点和边 |
 
 ## 8. API 任务
 
@@ -104,14 +105,14 @@ MVP 第一版只承诺 P0 闭环：
 | API-02 | `/entities/search?q=` | GET | P0 | 按标准名、别名、原始名搜索企业 |
 | API-03 | `/entities/{entity_id}` | GET | P0 | 返回企业详情、别名、标签和统计 |
 | API-04 | `/entities/{entity_id}/neighbors` | GET | P0 | 返回一跳关系 |
-| API-05 | `/entities/{entity_id}/ego-graph` | GET | P0 | 返回中心企业图谱 JSON |
+| API-05 | `/entities/{entity_id}/ego-graph` | GET | P0 | 返回中心企业图谱 JSON，支持 `depth`、`max_nodes` 和 `include_rejected` |
 | API-06 | `/relationships/{relationship_id}` | GET | P0 | 返回关系详情 |
 | API-07 | `/relationships/{relationship_id}/evidence` | GET | P0 | 返回订单证据和人工记录 |
 | API-08 | `/relationships/{relationship_id}/decision` | POST | P0 | 支持确认、否定、修改关系 |
 | API-09 | `/relationships/manual` | POST | P0 | 支持人工新增关系 |
 | API-10 | `/exports/relationships` | POST | P0 | 导出关系明细 Excel/CSV |
 | API-11 | `/imports/run` | POST | P0 | 触发导入、边生成和候选聚合，并返回 `archived_files` |
-| API-12 | `/paths?from=&to=` | GET | P1 | 返回 A 到 C 的关系路径 |
+| API-12 | `/paths?from_entity_id=&to_entity_id=` | GET | P1 | 返回 A 到 C 的关系路径，支持 `max_depth`、`max_paths` 和 `include_rejected` |
 | API-13 | `/imports` | GET | P1 | 查看导入批次 |
 | API-14 | `/reviews/queue` | GET | P1 | 按状态、批次、关键词和置信等级查看全局待审核候选关系 |
 
@@ -129,8 +130,8 @@ MVP 第一版只承诺 P0 闭环：
 | UI-08 | 人工审核表单 | P0 | 可确认、否定、修改关系类型并填写备注 |
 | UI-09 | 人工新增关系表单 | P0 | 可选择两个企业并新增关系 |
 | UI-10 | 导出按钮 | P0 | 可导出当前中心企业关系明细 |
-| UI-11 | 二跳展开 | P1 | 节点过多时提示收窄条件 |
-| UI-12 | 路径查询 | P1 | 可返回两个企业之间的连接路径 |
+| UI-11 | 二跳展开 | P1 | 图谱页可设置 `Graph depth` / `Max nodes`，节点过多时按上限截断 |
+| UI-12 | 路径查询 | P1 | 可输入两个企业 ID，返回路径步骤表并提示未知主体或无路径 |
 | UI-13 | 全局待审核队列 | P1 | 可跨企业查看、筛选并带入人工审核候选关系；审核成功后自动刷新队列 |
 
 ## 10. 第一版验收清单
@@ -146,10 +147,12 @@ MVP 第一版只承诺 P0 闭环：
 - [x] 人工结果写入最终关系、决策记录和审计日志；
 - [x] 已否定关系不会被物理删除或被系统自动覆盖；
 - [x] 用户可以导出中心企业关系明细。
+- [x] 用户可以在图谱页展开二跳关系并限制最大节点数；
+- [x] 用户可以查询两个企业之间的连接路径，并查看路径步骤、边来源、状态和证据。
 
 ## 11. 当前实现状态
 
-截至 2026-05-28，仓库已完成 M2-M9 P0/P1 的服务层优先实现、历史关系复用、演示验收数据包和真实数据试运行导入质量闭环：
+截至 2026-06-01，仓库已完成 M2-M10 P0/P1 的服务层优先实现、历史关系复用、演示验收数据包、真实数据试运行导入质量闭环，以及二跳图谱与两企业路径查询：
 
 - M2：支持 Excel/CSV 导入，生成 `import_batch`、`import_source_file`、`entity`、`entity_alias`、`order_evidence`，并可导入已有 `relationship_claim`；导入时会复制原始文件到 `data/raw/imports/<run_id>/`。
 - M3：支持生成 `customer_to_shipper`、`customer_to_consignee`、`customer_to_notify`、`shipper_to_consignee` 四类 P0 订单角色边。
@@ -159,6 +162,7 @@ MVP 第一版只承诺 P0 闭环：
 - M7：支持中文 Streamlit MVP 工作台 tabs：数据导入、企业搜索、关系图谱、关系详情、待审核队列、人工审核、导出；顶部包含基础逻辑与使用方法说明；表格字段和常见后端错误已面向业务用户中文化；审核成功后会刷新页面以更新待审核队列。
 - M8：新增可重复生成的演示数据包和预置审核脚本；演示数据约 50 个主体、80+ 条订单，保留待审核候选关系，并覆盖主要最终关系类型；支持历史人工判断复用、沿用历史、替代历史和标记待验证。
 - M9：支持默认字段映射配置、导入行级异常记录、导入批次查询、质量报告和异常 CSV 导出，真实数据试运行时可保留有效行并沉淀坏行原因。
+- M10：支持 `GET /entities/{entity_id}/ego-graph?depth=2&max_nodes=...` 二跳展开、`GET /paths` 两企业路径查询，以及 Streamlit 图谱页中的深度/节点控制和路径步骤表。
 
 验证命令：
 
@@ -167,4 +171,4 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-当前通过标准：全量测试 164 passed，ruff 0 errors。
+当前通过标准：全量测试 190 passed，ruff 0 errors。
