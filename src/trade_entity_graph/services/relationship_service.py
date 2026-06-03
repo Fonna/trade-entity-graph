@@ -26,6 +26,16 @@ REVIEWABLE_DETAIL_CLAIM_STATUSES = (
     "history_conflict",
     "pending_verify",
 )
+EXTERNAL_EVIDENCE_FIELDS = (
+    "evidence_type",
+    "source_title",
+    "source_url",
+    "source_name",
+    "evidence_summary",
+    "evidence_date",
+    "confidence_level",
+    "created_by",
+)
 
 
 def _is_invalid_role_name(value: str | None) -> bool:
@@ -275,7 +285,7 @@ def get_relationship_detail(
 def get_relationship_evidence(
     relationship_id: str, *, db_path: str | Path | None = None
 ) -> list[dict[str, Any]]:
-    """Return order-role edges supporting a curated relationship or candidate."""
+    """Return order-role and supplemental evidence for a relationship or candidate."""
 
     detail = get_relationship_detail(relationship_id, db_path=db_path)
     if not detail:
@@ -290,7 +300,10 @@ def get_relationship_evidence(
             """,
             (detail["from_entity_id"], detail["to_entity_id"]),
         ).fetchall()
-        return [dict(row) for row in rows]
+        order_evidence = [
+            {**dict(row), "evidence_record_type": "order_role_edge"} for row in rows
+        ]
+    return order_evidence + list_external_evidence(relationship_id, db_path=db_path)
 
 
 def list_relationship_claims_for_entity(
@@ -308,3 +321,148 @@ def list_relationship_claims_for_entity(
             (entity_id, entity_id),
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+def _clean_evidence_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _has_external_evidence_content(evidence: dict[str, Any] | None) -> bool:
+    if not evidence:
+        return False
+    return any(_clean_evidence_value(evidence.get(field)) for field in EXTERNAL_EVIDENCE_FIELDS)
+
+
+def _normalize_external_evidence(
+    evidence: dict[str, Any],
+    *,
+    created_by: str | None = None,
+) -> dict[str, str | None]:
+    normalized = {
+        field: _clean_evidence_value(evidence.get(field)) for field in EXTERNAL_EVIDENCE_FIELDS
+    }
+    if created_by and not normalized["created_by"]:
+        normalized["created_by"] = created_by
+    if not normalized["evidence_type"]:
+        normalized["evidence_type"] = "manual_note"
+    if not normalized["evidence_summary"]:
+        raise ValueError("补充证据摘要为必填项")
+    if not normalized["created_by"]:
+        raise ValueError("补充证据创建人为必填项")
+    return normalized
+
+
+def add_external_evidence_record(
+    connection,
+    *,
+    relationship_id: str | None = None,
+    claim_id: str | None = None,
+    evidence: dict[str, Any] | None,
+    created_by: str | None = None,
+) -> dict[str, Any] | None:
+    """Insert optional structured supplemental evidence using an existing connection."""
+
+    if not _has_external_evidence_content(evidence):
+        return None
+    if not relationship_id and not claim_id:
+        raise ValueError("补充证据必须绑定最终关系或候选关系")
+
+    normalized = _normalize_external_evidence(evidence or {}, created_by=created_by)
+    external_evidence_id = new_id("EEV")
+    connection.execute(
+        """
+        INSERT INTO relationship_external_evidence (
+            external_evidence_id, relationship_id, claim_id, evidence_type,
+            source_title, source_url, source_name, evidence_summary, evidence_date,
+            confidence_level, created_by
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            external_evidence_id,
+            relationship_id,
+            claim_id,
+            normalized["evidence_type"],
+            normalized["source_title"],
+            normalized["source_url"],
+            normalized["source_name"],
+            normalized["evidence_summary"],
+            normalized["evidence_date"],
+            normalized["confidence_level"],
+            normalized["created_by"],
+        ),
+    )
+    row = connection.execute(
+        """
+        SELECT *
+        FROM relationship_external_evidence
+        WHERE external_evidence_id = ?
+        """,
+        (external_evidence_id,),
+    ).fetchone()
+    return dict(row)
+
+
+def create_external_evidence(
+    target_id: str,
+    evidence: dict[str, Any],
+    *,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Attach structured supplemental evidence to a relationship or claim."""
+
+    detail = get_relationship_detail(target_id, db_path=db_path)
+    if not detail:
+        raise ValueError(f"未找到关系或候选关系：{target_id}")
+
+    relationship_id = (
+        detail["relationship_id"] if detail["record_type"] == "curated_relationship" else None
+    )
+    claim_id = detail["claim_id"] if detail["record_type"] == "relationship_claim" else None
+    with get_connection(db_path) as connection:
+        created = add_external_evidence_record(
+            connection,
+            relationship_id=relationship_id,
+            claim_id=claim_id,
+            evidence=evidence,
+        )
+        connection.commit()
+    if created is None:
+        raise ValueError("补充证据内容不能为空")
+    return created
+
+
+def list_external_evidence(
+    target_id: str,
+    *,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return structured supplemental evidence for a relationship or claim."""
+
+    detail = get_relationship_detail(target_id, db_path=db_path)
+    if not detail:
+        return []
+
+    relationship_id = None
+    claim_id = None
+    if detail["record_type"] == "curated_relationship":
+        relationship_id = detail["relationship_id"]
+        claim_id = detail.get("decision_source")
+    else:
+        claim_id = detail["claim_id"]
+
+    with get_connection(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM relationship_external_evidence
+            WHERE relationship_id = ?
+               OR claim_id = ?
+            ORDER BY created_at, external_evidence_id
+            """,
+            (relationship_id, claim_id),
+        ).fetchall()
+    return [{**dict(row), "evidence_record_type": "external_evidence"} for row in rows]

@@ -177,6 +177,21 @@ CREATE TABLE IF NOT EXISTS relationship_decision (
     operated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS relationship_external_evidence (
+    external_evidence_id TEXT PRIMARY KEY,
+    relationship_id TEXT REFERENCES curated_relationship(relationship_id),
+    claim_id TEXT REFERENCES relationship_claim(claim_id),
+    evidence_type TEXT NOT NULL,
+    source_title TEXT,
+    source_url TEXT,
+    source_name TEXT,
+    evidence_summary TEXT NOT NULL,
+    evidence_date TEXT,
+    confidence_level TEXT,
+    created_by TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     audit_id TEXT PRIMARY KEY,
     object_type TEXT NOT NULL,
@@ -202,6 +217,10 @@ CREATE INDEX IF NOT EXISTS idx_order_role_edge_role_pair ON order_role_edge(role
 CREATE INDEX IF NOT EXISTS idx_relationship_claim_pair ON relationship_claim(from_entity_id, to_entity_id);
 CREATE INDEX IF NOT EXISTS idx_curated_relationship_pair ON curated_relationship(from_entity_id, to_entity_id);
 CREATE INDEX IF NOT EXISTS idx_curated_relationship_status ON curated_relationship(relation_status);
+CREATE INDEX IF NOT EXISTS idx_relationship_external_evidence_relationship
+ON relationship_external_evidence(relationship_id);
+CREATE INDEX IF NOT EXISTS idx_relationship_external_evidence_claim
+ON relationship_external_evidence(claim_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_curated_relationship_decision_source_unique
 ON curated_relationship(decision_source)
 WHERE decision_source IS NOT NULL;

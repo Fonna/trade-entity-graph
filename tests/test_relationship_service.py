@@ -5,7 +5,13 @@ from trade_entity_graph.importers.models import ImportInputs
 from trade_entity_graph.importers.pipeline import run_import
 from trade_entity_graph.services.relationship_service import (
     aggregate_relationship_claims,
+    create_external_evidence,
     generate_order_role_edges,
+    get_relationship_evidence,
+)
+from trade_entity_graph.services.review_service import (
+    create_manual_relationship,
+    decide_relationship,
 )
 
 
@@ -97,3 +103,118 @@ def test_aggregate_relationship_claims_rolls_up_edges_with_confidence(tmp_path) 
     assert acme_beta["role_pair_summary"] == "customer_to_shipper:2"
     assert "2 orders" in acme_beta["recommendation_reason"]
     assert "7.5 TEU" in acme_beta["recommendation_reason"]
+
+
+def _first_claim_id(db_path) -> str:
+    with get_connection(db_path) as connection:
+        row = connection.execute(
+            "SELECT claim_id FROM relationship_claim ORDER BY confidence_score DESC LIMIT 1"
+        ).fetchone()
+    return row["claim_id"]
+
+
+def _entity_id(db_path, canonical_name: str) -> str:
+    with get_connection(db_path) as connection:
+        row = connection.execute(
+            "SELECT entity_id FROM entity WHERE canonical_name = ?",
+            (canonical_name,),
+        ).fetchone()
+    return row["entity_id"]
+
+
+def test_create_external_evidence_attaches_structured_evidence_to_claim(tmp_path) -> None:
+    db_path, run_id = _seed_import(tmp_path)
+    generate_order_role_edges(db_path=db_path, run_id=run_id)
+    aggregate_relationship_claims(db_path=db_path, run_id=run_id)
+    claim_id = _first_claim_id(db_path)
+
+    created = create_external_evidence(
+        claim_id,
+        {
+            "evidence_type": "public_web",
+            "source_title": "Beta factory profile",
+            "source_url": "https://example.com/beta",
+            "source_name": "Example Registry",
+            "evidence_summary": "Registry profile links Beta to Acme supplier onboarding.",
+            "evidence_date": "2026-06-03",
+            "confidence_level": "medium",
+            "created_by": "tester",
+        },
+        db_path=db_path,
+    )
+
+    evidence = get_relationship_evidence(claim_id, db_path=db_path)
+    external_rows = [
+        row for row in evidence if row["evidence_record_type"] == "external_evidence"
+    ]
+
+    assert created["claim_id"] == claim_id
+    assert created["relationship_id"] is None
+    assert external_rows[0]["source_title"] == "Beta factory profile"
+    assert external_rows[0]["source_url"] == "https://example.com/beta"
+
+
+def test_decide_relationship_with_external_evidence_binds_claim_and_relationship(
+    tmp_path,
+) -> None:
+    db_path, run_id = _seed_import(tmp_path)
+    generate_order_role_edges(db_path=db_path, run_id=run_id)
+    aggregate_relationship_claims(db_path=db_path, run_id=run_id)
+    claim_id = _first_claim_id(db_path)
+
+    relationship = decide_relationship(
+        claim_id,
+        action_type="confirm",
+        relation_type="trading_partner",
+        reason="Confirmed with public evidence.",
+        operator="tester",
+        external_evidence={
+            "evidence_type": "sales_feedback",
+            "source_title": "Sales confirmation",
+            "source_name": "Sales team",
+            "evidence_summary": "Sales confirmed this supplier relationship.",
+            "confidence_level": "high",
+            "created_by": "tester",
+        },
+        db_path=db_path,
+    )
+
+    evidence = get_relationship_evidence(relationship["relationship_id"], db_path=db_path)
+    external_rows = [
+        row for row in evidence if row["evidence_record_type"] == "external_evidence"
+    ]
+
+    assert external_rows[0]["claim_id"] == claim_id
+    assert external_rows[0]["relationship_id"] == relationship["relationship_id"]
+    assert external_rows[0]["evidence_type"] == "sales_feedback"
+
+
+def test_create_manual_relationship_with_external_evidence_binds_relationship(tmp_path) -> None:
+    db_path, _run_id = _seed_import(tmp_path)
+    from_entity_id = _entity_id(db_path, "ACME TRADING")
+    to_entity_id = _entity_id(db_path, "BETA FACTORY")
+
+    relationship = create_manual_relationship(
+        from_entity_id,
+        to_entity_id,
+        relation_type="same_group",
+        reason="Manual review.",
+        operator="tester",
+        external_evidence={
+            "evidence_type": "business_document",
+            "source_title": "Internal account note",
+            "evidence_summary": "Account owner confirmed group relationship.",
+            "confidence_level": "high",
+            "created_by": "tester",
+        },
+        db_path=db_path,
+    )
+
+    evidence = get_relationship_evidence(relationship["relationship_id"], db_path=db_path)
+    external_rows = [
+        row for row in evidence if row["evidence_record_type"] == "external_evidence"
+    ]
+
+    assert external_rows[0]["relationship_id"] == relationship["relationship_id"]
+    assert external_rows[0]["claim_id"] is None
+    assert external_rows[0]["source_title"] == "Internal account note"

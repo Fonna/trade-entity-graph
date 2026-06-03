@@ -12,6 +12,7 @@ from trade_entity_graph.services.history_reuse_service import (
     classify_claim_against_history,
     get_history_context_for_claim,
 )
+from trade_entity_graph.services.relationship_service import add_external_evidence_record
 from trade_entity_graph.utils.ids import new_id
 
 CURRENT_EFFECTIVE_STATUSES = ("verified", "manual_only", "rejected")
@@ -273,6 +274,7 @@ def decide_relationship(
     relation_type: str,
     reason: str,
     operator: str,
+    external_evidence: dict[str, Any] | None = None,
     db_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Create a curated relationship from a candidate review decision."""
@@ -335,6 +337,13 @@ def decide_relationship(
             reason=reason,
             operator=operator,
         )
+        add_external_evidence_record(
+            connection,
+            relationship_id=relationship_id,
+            claim_id=claim_id,
+            evidence=external_evidence,
+            created_by=operator,
+        )
         connection.commit()
         row = connection.execute(
             "SELECT * FROM curated_relationship WHERE relationship_id = ?",
@@ -348,6 +357,7 @@ def keep_history_for_claim(
     *,
     reason: str,
     operator: str,
+    external_evidence: dict[str, Any] | None = None,
     db_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Keep the effective historical relationship and mark the claim as matched."""
@@ -402,6 +412,13 @@ def keep_history_for_claim(
             reason=reason,
             operator=operator,
         )
+        add_external_evidence_record(
+            connection,
+            relationship_id=history_relationship_id,
+            claim_id=claim_id,
+            evidence=external_evidence,
+            created_by=operator,
+        )
         connection.commit()
         return {
             "claim_id": claim_id,
@@ -417,6 +434,7 @@ def supersede_history_with_claim(
     relation_type: str,
     reason: str,
     operator: str,
+    external_evidence: dict[str, Any] | None = None,
     db_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Deprecate the historical relationship and create a verified replacement."""
@@ -568,6 +586,13 @@ def supersede_history_with_claim(
                 reason,
             ),
         )
+        add_external_evidence_record(
+            connection,
+            relationship_id=relationship_id,
+            claim_id=claim_id,
+            evidence=external_evidence,
+            created_by=operator,
+        )
         connection.commit()
         row = connection.execute(
             "SELECT * FROM curated_relationship WHERE relationship_id = ?",
@@ -583,6 +608,7 @@ def mark_claim_pending_verify(
     *,
     reason: str,
     operator: str,
+    external_evidence: dict[str, Any] | None = None,
     db_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Mark a claim for further verification without changing history."""
@@ -632,6 +658,12 @@ def mark_claim_pending_verify(
             reason=reason,
             operator=operator,
         )
+        add_external_evidence_record(
+            connection,
+            claim_id=claim_id,
+            evidence=external_evidence,
+            created_by=operator,
+        )
         connection.commit()
         return {"claim_id": claim_id, "relation_status": after_status}
 
@@ -643,6 +675,7 @@ def create_manual_relationship(
     relation_type: str,
     reason: str,
     operator: str,
+    external_evidence: dict[str, Any] | None = None,
     db_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Create a manual curated relationship."""
@@ -679,6 +712,12 @@ def create_manual_relationship(
             after_status="manual_only",
             reason=reason,
             operator=operator,
+        )
+        add_external_evidence_record(
+            connection,
+            relationship_id=relationship_id,
+            evidence=external_evidence,
+            created_by=operator,
         )
         connection.commit()
         row = connection.execute(

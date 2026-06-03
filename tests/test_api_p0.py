@@ -384,6 +384,25 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
     assert relationship_payload["to_name"]
     assert "history_context" in relationship_payload
 
+    status, external_payload = _request(
+        app,
+        "POST",
+        f"/relationships/{claim_id}/external-evidence",
+        json_body={
+            "evidence_type": "public_web",
+            "source_title": "Acme supplier profile",
+            "source_url": "https://example.com/acme-supplier",
+            "source_name": "Example Registry",
+            "evidence_summary": "Public profile supports the candidate relationship.",
+            "evidence_date": "2026-06-03",
+            "confidence_level": "medium",
+            "created_by": "tester",
+        },
+    )
+    assert status == 200
+    assert external_payload["claim_id"] == claim_id
+    assert external_payload["relationship_id"] is None
+
     status, decision_payload = _request(
         app,
         "POST",
@@ -393,6 +412,13 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
             "relation_type": "trading_partner",
             "reason": "Confirmed by API test",
             "operator": "tester",
+            "external_evidence": {
+                "evidence_type": "sales_feedback",
+                "source_title": "Sales confirmation",
+                "source_name": "Sales team",
+                "evidence_summary": "Sales team confirmed this relationship.",
+                "confidence_level": "high",
+            },
         },
     )
     assert status == 200
@@ -401,6 +427,14 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
     status, evidence_payload = _request(app, "GET", f"/relationships/{relationship_id}/evidence")
     assert status == 200
     assert evidence_payload
+    external_evidence = [
+        row for row in evidence_payload if row["evidence_record_type"] == "external_evidence"
+    ]
+    assert {row["evidence_type"] for row in external_evidence} == {
+        "public_web",
+        "sales_feedback",
+    }
+    assert any(row["relationship_id"] == relationship_id for row in external_evidence)
 
     status, export_payload = _request(
         app,

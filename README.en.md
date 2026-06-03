@@ -1,4 +1,12 @@
 # Trade Entity Graph
+## 2026-06-03 Status Update
+
+- Added structured supplemental evidence: `relationship_external_evidence` can link to either a relationship candidate or a curated relationship and stores evidence type, title, URL, source, summary, date, confidence level, and creator.
+- FastAPI now provides `POST /relationships/{relationship_id}/external-evidence`; review and manual relationship requests can include `external_evidence`.
+- Streamlit relationship details now separate order evidence and supplemental evidence; the review page accepts optional supplemental evidence.
+- P1 auxiliary order-role edges `shipper_to_notify` / `consignee_to_notify` remain deferred; the importer still generates the four P0 order-role edge types.
+- Latest verification: `uv --cache-dir .uv-cache run pytest` returned `207 passed`, and `uv --cache-dir .uv-cache run ruff check .` returned `All checks passed!`.
+
 
 English | [中文](README.md)
 
@@ -68,7 +76,7 @@ trade-entity-graph/
 
 ## Quick Start
 
-The repository has completed the M0/M1 baseline and now includes the M2-M10 P0/P1 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop/two-hop graph query, two-entity path query, FastAPI endpoints, Chinese Streamlit workbench, export support, demo acceptance data, and the M9 real-data import QA loop with configurable field mapping, row-level import errors, import batch queries, quality reports, and import-error CSV export. M10 adds bounded two-hop expansion, `GET /paths`, and a Streamlit path-query workflow.
+The repository has completed the M0/M1 baseline and now includes the M2-M10 P0/P1 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop/two-hop graph query, two-entity path query, FastAPI endpoints, Chinese Streamlit workbench, export support, demo acceptance data, and the M9 real-data import QA loop with configurable field mapping, row-level import errors, import batch queries, quality reports, and import-error CSV export. M10 adds bounded two-hop expansion, `GET /paths`, and a Streamlit path-query workflow. On 2026-06-03, structured supplemental evidence was added for relationship candidates and curated relationships. P1 auxiliary order-role edges (`shipper_to_notify`, `consignee_to_notify`) remain deferred.
 
 All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
 
@@ -168,14 +176,14 @@ flowchart TD
 
 ## Current Development Status
 
-As of 2026-06-01, the current branch includes the M2-M10 P0/P1 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, demo acceptance data, the M9 real-data import QA loop, and the M10 two-hop graph and two-entity path-query workflow. Latest verification:
+As of 2026-06-03, the current branch includes the M2-M10 P0/P1 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, demo acceptance data, the M9 real-data import QA loop, the M10 two-hop graph and two-entity path-query workflow, and structured supplemental evidence. Latest verification:
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-Result: `190 passed`, ruff `All checks passed!`.
+Result: `207 passed`, ruff `All checks passed!`.
 
 ## Recommended Development Order
 
@@ -190,6 +198,7 @@ Result: `190 passed`, ruff `All checks passed!`.
 9. M8: Review persistence, audit logs, acceptance demo.
 10. M9: Real-data dry runs, import quality reports, and import-error workflow.
 11. M10: Two-hop graph expansion, `GET /paths` two-entity path query, and Streamlit path-query workflow.
+12. Structured supplemental evidence: attach public information, sales feedback, business documents, and manual notes to candidates or curated relationships; P1 auxiliary order-role edges remain deferred.
 
 ## Remote Repository
 

@@ -22,6 +22,62 @@ def test_streamlit_app_exposes_mvp_tab_renderers() -> None:
     assert callable(streamlit_app.set_selected_claim_id)
     assert callable(streamlit_app.localize_table_records)
     assert callable(streamlit_app.format_error_message)
+    assert callable(streamlit_app.build_external_evidence_payload)
+    assert callable(streamlit_app.split_evidence_records)
+
+
+def test_build_external_evidence_payload_returns_none_without_summary() -> None:
+    assert (
+        streamlit_app.build_external_evidence_payload(
+            evidence_type="public_web",
+            source_title="Registry page",
+            source_url="https://example.com",
+            source_name="Registry",
+            evidence_summary="",
+            evidence_date="2026-06-03",
+            confidence_level="medium",
+            created_by="tester",
+        )
+        is None
+    )
+
+
+def test_build_external_evidence_payload_trims_values_and_defaults_created_by() -> None:
+    payload = streamlit_app.build_external_evidence_payload(
+        evidence_type=" public_web ",
+        source_title=" Registry page ",
+        source_url=" https://example.com ",
+        source_name=" Registry ",
+        evidence_summary=" Public profile supports the relationship. ",
+        evidence_date=" 2026-06-03 ",
+        confidence_level=" medium ",
+        created_by="",
+        default_created_by="tester",
+    )
+
+    assert payload == {
+        "evidence_type": "public_web",
+        "source_title": "Registry page",
+        "source_url": "https://example.com",
+        "source_name": "Registry",
+        "evidence_summary": "Public profile supports the relationship.",
+        "evidence_date": "2026-06-03",
+        "confidence_level": "medium",
+        "created_by": "tester",
+    }
+
+
+def test_split_evidence_records_separates_order_and_external_evidence() -> None:
+    order_rows, external_rows = streamlit_app.split_evidence_records(
+        [
+            {"evidence_record_type": "order_role_edge", "edge_id": "EDG_1"},
+            {"evidence_record_type": "external_evidence", "external_evidence_id": "EEV_1"},
+            {"edge_id": "EDG_LEGACY"},
+        ]
+    )
+
+    assert [row.get("edge_id") for row in order_rows] == ["EDG_1", "EDG_LEGACY"]
+    assert [row["external_evidence_id"] for row in external_rows] == ["EEV_1"]
 
 
 def test_streamlit_app_uses_chinese_tab_labels() -> None:

@@ -62,6 +62,12 @@ RELATION_TYPE_OPTIONS: tuple[str, ...] = (
     "unknown",
     "rejected_relation",
 )
+EXTERNAL_EVIDENCE_TYPE_OPTIONS: tuple[str, ...] = (
+    "manual_note",
+    "public_web",
+    "sales_feedback",
+    "business_document",
+)
 RELATION_TYPE_LABELS: dict[str, str] = {
     "customer_to_shipper": "客户到发货人",
     "customer_to_consignee": "客户到收货人",
@@ -467,6 +473,116 @@ def show_table(records: Any) -> None:
     """Render a Streamlit dataframe with localized business-facing labels."""
 
     st.dataframe(localize_table_records(records))
+
+
+def _clean_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def build_external_evidence_payload(
+    *,
+    evidence_type: str | None,
+    source_title: str | None,
+    source_url: str | None,
+    source_name: str | None,
+    evidence_summary: str | None,
+    evidence_date: str | None,
+    confidence_level: str | None,
+    created_by: str | None,
+    default_created_by: str | None = None,
+) -> dict[str, str] | None:
+    """Build an optional supplemental evidence payload from UI field values."""
+
+    summary = _clean_optional_text(evidence_summary)
+    if not summary:
+        return None
+
+    payload = {
+        "evidence_type": _clean_optional_text(evidence_type) or "manual_note",
+        "source_title": _clean_optional_text(source_title),
+        "source_url": _clean_optional_text(source_url),
+        "source_name": _clean_optional_text(source_name),
+        "evidence_summary": summary,
+        "evidence_date": _clean_optional_text(evidence_date),
+        "confidence_level": _clean_optional_text(confidence_level),
+        "created_by": _clean_optional_text(created_by) or _clean_optional_text(default_created_by),
+    }
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+def split_evidence_records(
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split combined relationship evidence rows by storage source."""
+
+    order_rows: list[dict[str, Any]] = []
+    external_rows: list[dict[str, Any]] = []
+    for record in records:
+        if record.get("evidence_record_type") == "external_evidence":
+            external_rows.append(record)
+        else:
+            order_rows.append(record)
+    return order_rows, external_rows
+
+
+def render_evidence_records(records: list[dict[str, Any]]) -> None:
+    """Render order-role evidence and supplemental evidence separately."""
+
+    order_rows, external_rows = split_evidence_records(records)
+    st.markdown("**订单证据**")
+    show_table(order_rows)
+    st.markdown("**补充证据**")
+    show_table(external_rows)
+
+
+def render_external_evidence_inputs(
+    key_prefix: str,
+    *,
+    default_created_by: str | None = None,
+) -> dict[str, str] | None:
+    """Render optional supplemental evidence inputs and return a payload."""
+
+    if not hasattr(st, "expander"):
+        return None
+
+    with st.expander("补充结构化证据（可选）"):
+        evidence_type = st.selectbox(
+            "证据类型",
+            EXTERNAL_EVIDENCE_TYPE_OPTIONS,
+            key=f"{key_prefix}_external_evidence_type",
+        )
+        source_title = st.text_input("证据标题", key=f"{key_prefix}_external_source_title")
+        source_url = st.text_input("证据链接", key=f"{key_prefix}_external_source_url")
+        source_name = st.text_input("证据来源", key=f"{key_prefix}_external_source_name")
+        evidence_date = st.text_input("证据日期", key=f"{key_prefix}_external_evidence_date")
+        confidence_level = st.selectbox(
+            "证据置信等级",
+            ("", "high", "medium", "low"),
+            key=f"{key_prefix}_external_confidence_level",
+        )
+        evidence_summary = st.text_area(
+            "补充证据摘要",
+            key=f"{key_prefix}_external_evidence_summary",
+        )
+        created_by = st.text_input(
+            "证据创建人",
+            value=default_created_by or "",
+            key=f"{key_prefix}_external_created_by",
+        )
+    return build_external_evidence_payload(
+        evidence_type=evidence_type,
+        source_title=source_title,
+        source_url=source_url,
+        source_name=source_name,
+        evidence_summary=evidence_summary,
+        evidence_date=evidence_date,
+        confidence_level=confidence_level,
+        created_by=created_by,
+        default_created_by=default_created_by,
+    )
 
 
 def _short_edge_label(edge: dict[str, Any]) -> str:
@@ -1189,7 +1305,7 @@ def render_relationship_detail_tab() -> None:
     relationship_id = st.text_input("关系 ID 或候选关系 ID")
     if relationship_id:
         st.json(get_relationship_detail(relationship_id))
-        show_table(get_relationship_evidence(relationship_id))
+        render_evidence_records(get_relationship_evidence(relationship_id))
 
 
 def render_review_queue_tab() -> None:
@@ -1248,7 +1364,7 @@ def render_review_queue_tab() -> None:
     selected_detail = get_relationship_detail(selected_claim_id)
     st.markdown(format_manual_review_context(selected_detail))
     with st.expander("查看订单证据"):
-        show_table(get_relationship_evidence(selected_claim_id))
+        render_evidence_records(get_relationship_evidence(selected_claim_id))
     if st.button("带到人工审核 tab", key="review_queue_to_review_button"):
         set_selected_claim_id(selected_claim_id)
         st.success(f"已选择候选关系 {selected_claim_id}，请切换到人工审核 tab 继续处理。")
@@ -1317,6 +1433,10 @@ def render_review_tab() -> None:
         )
     reason = st.text_area("\u5224\u65ad\u7406\u7531")
     operator = st.text_input("\u64cd\u4f5c\u4eba", value="local_user")
+    external_evidence = render_external_evidence_inputs(
+        "review",
+        default_created_by=operator,
+    )
     if st.button("\u63d0\u4ea4\u5ba1\u6838") and claim_id:
         try:
             if action_type == "keep_history":
@@ -1324,12 +1444,14 @@ def render_review_tab() -> None:
                     claim_id,
                     reason=reason,
                     operator=operator,
+                    external_evidence=external_evidence,
                 )
             elif action_type == "mark_pending_verify":
                 result = mark_claim_pending_verify(
                     claim_id,
                     reason=reason,
                     operator=operator,
+                    external_evidence=external_evidence,
                 )
             elif action_type == "supersede_history":
                 result = supersede_history_with_claim(
@@ -1342,6 +1464,7 @@ def render_review_tab() -> None:
                     relation_type=relation_type or default_relation_type,
                     reason=reason,
                     operator=operator,
+                    external_evidence=external_evidence,
                 )
             else:
                 result = decide_relationship(
@@ -1350,6 +1473,7 @@ def render_review_tab() -> None:
                     relation_type=relation_type or default_relation_type,
                     reason=reason,
                     operator=operator,
+                    external_evidence=external_evidence,
                 )
         except ValueError as exc:
             st.error(format_error_message(exc))
@@ -1380,6 +1504,10 @@ def render_review_tab() -> None:
         format_func=format_relation_type_option,
     )
     manual_reason = st.text_area("\u4eba\u5de5\u65b0\u589e\u7406\u7531")
+    manual_external_evidence = render_external_evidence_inputs(
+        "manual",
+        default_created_by=operator,
+    )
     if st.button("\u521b\u5efa\u4eba\u5de5\u5173\u7cfb") and from_entity_id and to_entity_id:
         try:
             result = create_manual_relationship(
@@ -1388,6 +1516,7 @@ def render_review_tab() -> None:
                 relation_type=manual_relation_type,
                 reason=manual_reason,
                 operator=operator,
+                external_evidence=manual_external_evidence,
             )
         except ValueError as exc:
             st.error(format_error_message(exc))

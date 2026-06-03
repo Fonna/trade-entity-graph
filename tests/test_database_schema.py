@@ -17,6 +17,7 @@ EXPECTED_TABLES = {
     "order_role_edge",
     "relationship_claim",
     "relationship_decision",
+    "relationship_external_evidence",
 }
 
 EXPECTED_INDEXES = {
@@ -34,6 +35,8 @@ EXPECTED_INDEXES = {
     "idx_order_role_edge_role_pair",
     "idx_order_role_edge_to",
     "idx_relationship_claim_pair",
+    "idx_relationship_external_evidence_claim",
+    "idx_relationship_external_evidence_relationship",
 }
 
 
@@ -71,6 +74,31 @@ def test_import_error_schema_has_traceability_columns(tmp_path) -> None:
         "error_id", "run_id", "source_file_id", "file_role", "source_path",
         "sheet_name", "row_number", "column_name", "normalized_field", "raw_value",
         "error_type", "severity", "message", "created_at",
+    }.issubset(columns)
+
+
+def test_relationship_external_evidence_schema_has_traceability_columns(tmp_path) -> None:
+    db_path = initialize_database(tmp_path / "trade_entity_graph.db")
+
+    with get_connection(db_path) as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(relationship_external_evidence)")
+        }
+
+    assert {
+        "external_evidence_id",
+        "relationship_id",
+        "claim_id",
+        "evidence_type",
+        "source_title",
+        "source_url",
+        "source_name",
+        "evidence_summary",
+        "evidence_date",
+        "confidence_level",
+        "created_by",
+        "created_at",
     }.issubset(columns)
 
 
