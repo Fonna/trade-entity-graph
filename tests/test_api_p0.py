@@ -348,7 +348,7 @@ def test_api_p0_import_search_review_graph_export(tmp_path, monkeypatch) -> None
         },
     )
     assert status == 200
-    assert import_payload["edge_count"] == 7
+    assert import_payload["edge_count"] == 8
     assert import_payload["claim_count"] == 3
     assert import_payload["history_reuse"] == {
         "history_matched": 0,

@@ -12,11 +12,13 @@ from trade_entity_graph.services.history_reuse_service import get_history_contex
 from trade_entity_graph.utils.ids import new_id
 from trade_entity_graph.utils.normalization import normalize_company_name
 
-P0_ROLE_PAIRS = (
+ORDER_ROLE_PAIRS = (
     ("customer_name", "customer", "shipper_name", "shipper", "customer_to_shipper"),
     ("customer_name", "customer", "consignee_name", "consignee", "customer_to_consignee"),
     ("customer_name", "customer", "notify_name", "notify", "customer_to_notify"),
     ("shipper_name", "shipper", "consignee_name", "consignee", "shipper_to_consignee"),
+    ("shipper_name", "shipper", "notify_name", "notify", "shipper_to_notify"),
+    ("consignee_name", "consignee", "notify_name", "notify", "consignee_to_notify"),
 )
 
 INVALID_ROLE_NAMES = {"", "SAME AS", "TO ORDER", "YQN", "YQN LOGISTICS"}
@@ -46,7 +48,7 @@ def _is_invalid_role_name(value: str | None) -> bool:
 def generate_order_role_edges(
     *, db_path: str | Path | None = None, run_id: str | None = None
 ) -> dict[str, int]:
-    """Generate P0 order-role evidence edges from imported order evidence."""
+    """Generate P0 and P1 order-role evidence edges from imported order evidence."""
 
     with get_connection(db_path) as connection:
         if run_id:
@@ -64,7 +66,7 @@ def generate_order_role_edges(
         edge_count = 0
         skipped_count = 0
         for evidence in evidence_rows:
-            for from_col, from_role, to_col, to_role, pair_type in P0_ROLE_PAIRS:
+            for from_col, from_role, to_col, to_role, pair_type in ORDER_ROLE_PAIRS:
                 from_name = evidence[from_col]
                 to_name = evidence[to_col]
                 if _is_invalid_role_name(from_name) or _is_invalid_role_name(to_name):

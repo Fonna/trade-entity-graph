@@ -60,18 +60,56 @@ def test_generate_order_role_edges_creates_p0_edges_and_filters_placeholders(tmp
             """
         ).fetchall()
 
-    assert result["edge_count"] == 7
+    assert result["edge_count"] == 8
     assert [row["role_pair_type"] for row in rows if row["order_id"] == "SO-1"] == [
         "customer_to_consignee",
         "customer_to_notify",
         "customer_to_shipper",
         "shipper_to_consignee",
+        "shipper_to_notify",
     ]
     assert [row["role_pair_type"] for row in rows if row["order_id"] == "SO-2"] == [
         "customer_to_consignee",
         "customer_to_shipper",
         "shipper_to_consignee",
     ]
+
+
+def test_generate_order_role_edges_creates_consignee_to_notify_when_distinct(
+    tmp_path,
+) -> None:
+    entities_path = tmp_path / "entities.csv"
+    orders_path = tmp_path / "orders.csv"
+    db_path = tmp_path / "trade_entity_graph.db"
+    pd.DataFrame(
+        {
+            "标准名": ["ACME TRADING", "BETA FACTORY", "OMEGA BUYER", "DELTA NOTIFY"],
+        }
+    ).to_csv(entities_path, index=False)
+    pd.DataFrame(
+        {
+            "订单号": ["SO-1"],
+            "下单客户": ["ACME TRADING"],
+            "发货人": ["BETA FACTORY"],
+            "收货人": ["OMEGA BUYER"],
+            "通知人": ["DELTA NOTIFY"],
+        }
+    ).to_csv(orders_path, index=False)
+    result = run_import(
+        ImportInputs(orders_path=orders_path, entities_path=entities_path, imported_by="tester"),
+        db_path=db_path,
+    )
+
+    generate_order_role_edges(db_path=db_path, run_id=result.run_id)
+
+    with get_connection(db_path) as connection:
+        role_pairs = {
+            row["role_pair_type"]
+            for row in connection.execute("SELECT role_pair_type FROM order_role_edge")
+        }
+
+    assert "shipper_to_notify" in role_pairs
+    assert "consignee_to_notify" in role_pairs
 
 
 def test_aggregate_relationship_claims_rolls_up_edges_with_confidence(tmp_path) -> None:
@@ -103,6 +141,10 @@ def test_aggregate_relationship_claims_rolls_up_edges_with_confidence(tmp_path) 
     assert acme_beta["role_pair_summary"] == "customer_to_shipper:2"
     assert "2 orders" in acme_beta["recommendation_reason"]
     assert "7.5 TEU" in acme_beta["recommendation_reason"]
+    beta_omega = next(
+        row for row in claims if row["source"] == "BETA FACTORY" and row["target"] == "OMEGA BUYER"
+    )
+    assert beta_omega["role_pair_summary"] == "shipper_to_consignee:2; shipper_to_notify:1"
 
 
 def _first_claim_id(db_path) -> str:

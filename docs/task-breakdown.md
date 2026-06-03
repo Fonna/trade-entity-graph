@@ -1,11 +1,10 @@
 # MVP 研发任务清单
-## 2026-06-03 ????
+## 2026-06-03 Implementation Update
 
-- `CUR-05` ??????????????????????????????????????????????????
-- ????? `relationship_external_evidence`?????FastAPI ? Streamlit ?????
-- P1 ??????? `EDGE-07` / `EDGE-08` ????????????? P0 ??????
-- ?????`207 passed`?ruff 0 errors?
-
+- `CUR-05` is implemented as structured supplemental evidence with type, title, URL, source, summary, date, confidence, and creator fields.
+- `relationship_external_evidence` is wired through the service layer, FastAPI, and Streamlit.
+- P1 auxiliary order-role edges `EDGE-07` / `EDGE-08` are implemented as `shipper_to_notify` and `consignee_to_notify`.
+- Latest verification: `208 passed`, ruff 0 errors.
 
 本文档基于 `企业关系图谱系统_PRD.md` 与 `MVP研发任务拆解.md` 整理，用于后续开发排期、Issue 拆分和验收跟踪。
 
@@ -162,7 +161,7 @@ MVP 第一版只承诺 P0 闭环：
 截至 2026-06-01，仓库已完成 M2-M10 P0/P1 的服务层优先实现、历史关系复用、演示验收数据包、真实数据试运行导入质量闭环，以及二跳图谱与两企业路径查询：
 
 - M2：支持 Excel/CSV 导入，生成 `import_batch`、`import_source_file`、`entity`、`entity_alias`、`order_evidence`，并可导入已有 `relationship_claim`；导入时会复制原始文件到 `data/raw/imports/<run_id>/`。
-- M3：支持生成 `customer_to_shipper`、`customer_to_consignee`、`customer_to_notify`、`shipper_to_consignee` 四类 P0 订单角色边。
+- M3: Generates four P0 role edges (`customer_to_shipper`, `customer_to_consignee`, `customer_to_notify`, `shipper_to_consignee`) plus two P1 auxiliary edges (`shipper_to_notify`, `consignee_to_notify`).
 - M4：支持从订单角色边聚合候选关系，生成订单数、TEU、角色组合、目的国、产品摘要、置信度和推荐理由。
 - M5：支持实体搜索、实体详情、一跳图谱、关系详情、关系证据、审核写回和导出服务。
 - M6：支持 P0 FastAPI endpoint，包括导入、搜索、详情、图谱、关系详情、审核、全局待审核队列和导出；`/imports/run` 返回本次导入的 `archived_files`。

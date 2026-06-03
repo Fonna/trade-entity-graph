@@ -1,9 +1,9 @@
 # 本机企业主体关系复用与外部 Agent 导入指南
-## 2026-06-03 ?????????
+## 2026-06-03 Structured Supplemental Evidence Access
 
-??????????????????????????? `relationship_external_evidence`??? Agent ?????????????????/????????????????? Streamlit ??? FastAPI ???????
+This project supports structured supplemental evidence for relationship candidates and curated relationships through `relationship_external_evidence`. External agents must not write this table directly; generate importable candidate/confirmed relationship files first, then use the Streamlit UI or FastAPI to append structured evidence.
 
-API ???
+API example:
 
 ```powershell
 Invoke-RestMethod `
@@ -15,15 +15,14 @@ Invoke-RestMethod `
     "source_title":"Company profile",
     "source_url":"https://example.com/company",
     "source_name":"public registry",
-    "evidence_summary":"???????????????????",
+    "evidence_summary":"Public information supports the relationship",
     "evidence_date":"2026-06-03",
     "confidence_level":"medium",
     "created_by":"external_agent"
   }'
 ```
 
-???? Agent ??? CSV/Excel ?????????????? `recommendation_reason` ? `decision_note`????????? API/UI ??????????
-
+If an external agent only outputs CSV/Excel import packages, put evidence summaries in `recommendation_reason` or `decision_note`, then append structured supplemental evidence through this project API/UI after import.
 
 > 最新核对日期：2026-06-03
 > 核对依据：`src/trade_entity_graph/importers/field_mappings/default.json`、`src/trade_entity_graph/importers/pipeline.py`、`src/trade_entity_graph/importers/relationship_loader.py`、`src/trade_entity_graph/api/routers/imports.py`。
