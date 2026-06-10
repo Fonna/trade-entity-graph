@@ -15,6 +15,7 @@ def test_streamlit_app_exposes_mvp_tab_renderers() -> None:
     assert callable(streamlit_app.render_relationship_detail_tab)
     assert callable(streamlit_app.render_review_queue_tab)
     assert callable(streamlit_app.render_review_tab)
+    assert callable(streamlit_app.render_opportunity_tab)
     assert callable(streamlit_app.render_export_tab)
     assert callable(streamlit_app.render_graph_svg)
     assert callable(streamlit_app.get_candidate_edges)
@@ -22,6 +23,7 @@ def test_streamlit_app_exposes_mvp_tab_renderers() -> None:
     assert callable(streamlit_app.set_selected_claim_id)
     assert callable(streamlit_app.localize_table_records)
     assert callable(streamlit_app.format_error_message)
+    assert callable(streamlit_app.format_top_entities)
     assert callable(streamlit_app.build_external_evidence_payload)
     assert callable(streamlit_app.split_evidence_records)
 
@@ -88,6 +90,7 @@ def test_streamlit_app_uses_chinese_tab_labels() -> None:
         "关系详情",
         "待审核队列",
         "人工审核",
+        "机会发现",
         "导出",
     ]
 
@@ -99,6 +102,7 @@ def test_streamlit_app_documents_basic_logic_and_usage() -> None:
         "数据基础",
         "关系建立逻辑",
         "关系结果含义",
+        "关系群组与机会发现",
         "推荐操作流程",
         "文件字段要求",
     ]
@@ -110,6 +114,11 @@ def test_streamlit_app_documents_basic_logic_and_usage() -> None:
     assert "标准名" in intro_text
     assert "entity_id" in intro_text
     assert "订单角色边" in intro_text
+    assert "关系群组" in intro_text
+    assert "连通网络" in intro_text
+    assert "不是工商意义上的集团" in intro_text
+    assert "机会发现" in intro_text
+    assert "核心主体" in intro_text
     assert "人工审核" in intro_text
     assert "国家" in intro_text
     assert "主体类型" in intro_text
@@ -476,6 +485,39 @@ def test_graph_tab_requests_depth_two_graph(monkeypatch) -> None:
     assert calls == [("ENT_A", {"include_rejected": False, "depth": 2, "max_nodes": 25})]
 
 
+def test_opportunity_tab_renders_m11_opportunity_sections(monkeypatch) -> None:
+    calls = []
+    fake_st = GraphFakeStreamlit(depth=3, max_nodes=0)
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
+    monkeypatch.setattr(
+        streamlit_app,
+        "analyze_graph_opportunities",
+        lambda **kwargs: calls.append(kwargs)
+        or {
+            "summary": {
+                "entity_count": 4,
+                "edge_count": 3,
+                "cluster_count": 1,
+                "bridge_entity_count": 1,
+                "customer_opportunity_count": 1,
+                "relationship_opportunity_count": 1,
+            },
+            "relationship_opportunities": [{"claim_id": "CLM_AB"}],
+            "bridge_entities": [{"entity_id": "ENT_B"}],
+            "customer_opportunities": [{"entity_id": "ENT_A"}],
+            "clusters": [{"cluster_id": "CLS_001"}],
+        },
+    )
+
+    streamlit_app.render_opportunity_tab()
+
+    assert calls == [{"include_rejected": False, "limit": 3, "min_score": 0.0}]
+    assert ("高潜关系", 1) in fake_st.metrics
+    assert fake_st.frames[0][0]["候选关系ID"] == "CLM_AB"
+    assert fake_st.frames[1][0]["企业ID"] == "ENT_B"
+    assert fake_st.frames[2][0]["企业ID"] == "ENT_A"
+
+
 def test_graph_tab_renders_relation_type_metric_and_detail(monkeypatch) -> None:
     fake_st = GraphFakeStreamlit(center_entity_id="ENT_A")
     monkeypatch.setattr(streamlit_app, "st", fake_st)
@@ -804,6 +846,40 @@ def test_localize_table_records_renames_headers_and_common_values() -> None:
             "状态": "候选",
             "置信等级": "中",
         },
+    ]
+
+
+def test_localize_table_records_formats_m11_top_entities() -> None:
+    rows = streamlit_app.localize_table_records(
+        [
+            {
+                "cluster_id": "CLS_001",
+                "top_entities": [
+                    {
+                        "entity_id": "ENT_B",
+                        "canonical_name": "ORBIT ASIA HUB",
+                        "entity_type": "sales_center",
+                        "degree": 3,
+                    },
+                    {
+                        "entity_id": "ENT_A",
+                        "canonical_name": "ACME MARKET",
+                        "entity_type": "customer",
+                        "degree": 1,
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert rows == [
+        {
+            "关系群组ID": "CLS_001",
+            "核心主体": (
+                "ORBIT ASIA HUB（ENT_B，销售中心，连接度 3）; "
+                "ACME MARKET（ENT_A，客户，连接度 1）"
+            ),
+        }
     ]
 
 

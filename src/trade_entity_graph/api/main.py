@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from trade_entity_graph.api.routers import (
+    analytics,
     entities,
     exports,
     imports,
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "app": settings.app_name, "env": settings.app_env}
 
     app.include_router(imports.router)
+    app.include_router(analytics.router)
     app.include_router(entities.router)
     app.include_router(relationships.router)
     app.include_router(reviews.router)

@@ -1,11 +1,19 @@
 # Trade Entity Graph / 企业关系图谱系统
+## 2026-06-08 M11 Status Update
+
+- Added M11 graph analytics and opportunity discovery: relationship clusters, bridge entities, customer opportunity lists, and high-potential relationship candidates.
+- FastAPI provides `GET /analytics/opportunities` with `limit`, `min_score`, and `include_rejected` controls.
+- Streamlit adds a new `机会发现` tab for M11 metrics and opportunity tables.
+- M11 reuses existing edge tables and NetworkX; no new database tables are required.
+- Latest verification: `uv --cache-dir .uv-cache run pytest` returned `218 passed`, and `uv --cache-dir .uv-cache run ruff check .` returned `All checks passed!`.
+
 ## 2026-06-03 Status Update
 
 - Added structured supplemental evidence: `relationship_external_evidence` can link to relationship candidates or curated relationships.
 - FastAPI provides `POST /relationships/{relationship_id}/external-evidence`; review and manual relationship requests can include `external_evidence`.
 - Streamlit relationship details separate order evidence and supplemental evidence, and review forms accept optional supplemental evidence.
 - P1 auxiliary order-role edges are implemented: the importer now generates `shipper_to_notify` and `consignee_to_notify` in addition to the four P0 role edges.
-- Latest verification: `uv --cache-dir .uv-cache run pytest` returned `208 passed`, and `uv --cache-dir .uv-cache run ruff check .` returned `All checks passed!`.
+- Latest 2026-06-03 verification: `uv --cache-dir .uv-cache run pytest` returned `208 passed`, and `uv --cache-dir .uv-cache run ruff check .` returned `All checks passed!`.
 
 [English](README.en.md) | 中文
 
@@ -75,7 +83,7 @@ trade-entity-graph/
 
 ## 快速开始
 
-当前仓库已完成 M0/M1 基线，并具备 M2-M10 P0/P1 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳/二跳图谱查询、两企业路径查询、FastAPI 接口、中文 Streamlit 工作台、导出能力、演示验收数据包，以及 M9 真实数据试运行与导入质量闭环，包括字段映射配置、行级导入异常记录、导入批次查询、质量报告和异常 CSV 导出。M10 新增深度受限的二跳展开、`GET /paths` 和图谱页路径查询。
+当前仓库已完成 M0/M1 基线，并具备 M2-M11 P0/P1/P2 可演示闭环：Excel/CSV 导入、原始文件归档、订单角色边生成、候选关系聚合、一跳/二跳图谱查询、两企业路径查询、FastAPI 接口、中文 Streamlit 工作台、导出能力、演示验收数据包、M9 真实数据试运行与导入质量闭环，以及 M11 图谱分析/机会发现。M10 新增深度受限的二跳展开、`GET /paths` 和图谱页路径查询；M11 新增 `GET /analytics/opportunities` 和 Streamlit `机会发现` tab。
 
 本项目所有 Python 环境、依赖安装和命令运行统一使用 `uv`，避免污染全局 Python 环境。
 
@@ -126,6 +134,12 @@ M9 面向真实 Excel/CSV 试运行：默认字段映射可识别常见中文/�
 M10 将图谱服务扩展为受控的局部探索：`GET /entities/{entity_id}/ego-graph?depth=2&max_nodes=50` 可在默认一跳兼容的基础上展开二跳，并通过 `max_nodes` 限制节点数量；默认仍隐藏 `rejected` 关系，可用 `include_rejected=true` 显示。
 
 两企业路径查询通过 `GET /paths?from_entity_id=<A>&to_entity_id=<C>&max_depth=3&max_paths=5` 返回可解释路径、路径节点、边来源、状态和分数。Streamlit 关系图谱页支持设置 `Graph depth` / `Max nodes`，并在“两企业路径查询”区域输入起点、终点、最大深度和路径数，表格展示 `step/from_name/to_name/relation_type/record_type/status/evidence`；未知主体或无路径会给出可见提示。
+
+### M11 图谱分析与机会发现
+
+M11 将关系图谱从“查询关系”扩展为“发现机会”：`GET /analytics/opportunities?limit=20&min_score=0&include_rejected=false` 返回关系群组、桥接主体、客户机会清单和高潜关系候选。服务层复用 `order_role_edge`、`relationship_claim` 和 `curated_relationship`，通过 NetworkX 计算连通群组、桥接中心性、二跳客户网络和机会分，不新增数据库表。
+
+Streamlit 新增 `机会发现` tab，展示主体数、边数、关系群组、桥接主体、客户机会和高潜关系等指标，并给出可直接带入审核/销售分析的机会表。
 
 ## 数据流
 
@@ -180,14 +194,14 @@ flowchart TD
 
 ## 当前开发状态
 
-截至 2026-06-01，当前分支已包含 M2-M10 P0/P1 闭环、原始文件归档能力、历史关系复用、全局待审核队列、中文 Streamlit 工作台、演示验收数据包、M9 真实数据试运行与导入质量闭环，以及 M10 二跳图谱和两企业路径查询能力。最近一次验证：
+截至 2026-06-08，当前分支已包含 M2-M11 P0/P1/P2 闭环、原始文件归档能力、历史关系复用、全局待审核队列、中文 Streamlit 工作台、演示验收数据包、M9 真实数据试运行与导入质量闭环、M10 二跳图谱和两企业路径查询能力，以及 M11 图谱分析/机会发现能力。最近一次验证：
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-验证结果：`190 passed`，ruff `All checks passed!`。
+验证结果：`218 passed`，ruff `All checks passed!`。
 
 ## 推荐开发顺序
 
@@ -202,6 +216,7 @@ uv --cache-dir .uv-cache run ruff check .
 9. M8：人工审核写回、审计和验收演示。
 10. M9：真实数据试运行、导入质量报告和异常闭环。
 11. M10：二跳图谱展开、`GET /paths` 两企业路径查询和 Streamlit 路径查询工作流。
+12. M11：关系群组、桥接主体、客户机会清单和高潜关系候选的图谱分析/机会发现。
 
 ## 远程仓库
 

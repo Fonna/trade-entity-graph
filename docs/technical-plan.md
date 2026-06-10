@@ -1,11 +1,19 @@
 # MVP 技术方案拆解
+## 2026-06-08 M11 Technical Update
+
+- Added graph analytics and opportunity discovery on top of existing relationship edge tables.
+- `analyze_graph_opportunities()` returns relationship clusters, bridge entities, customer opportunity lists, and high-potential relationship candidates.
+- `GET /analytics/opportunities` exposes M11 analysis with `limit`, `min_score`, and `include_rejected`.
+- Streamlit adds a `机会发现` tab for M11 summary metrics and opportunity tables.
+- Latest verification: `218 passed`, ruff 0 errors.
+
 ## 2026-06-03 Technical Update
 
 - Added `relationship_external_evidence` for structured non-order evidence such as public information, sales feedback, business documents, and manual notes.
 - `get_relationship_evidence()` returns order-role evidence and supplemental evidence, separated by `evidence_record_type`.
 - `POST /relationships/{relationship_id}/external-evidence` appends evidence to a candidate or curated relationship; review/manual-create requests can include `external_evidence`.
 - Streamlit separates order evidence and supplemental evidence in relationship details and adds optional evidence inputs on review forms.
-- P1 auxiliary order-role edges `shipper_to_notify` / `consignee_to_notify` are implemented. Latest verification: `208 passed`, ruff 0 errors.
+- P1 auxiliary order-role edges `shipper_to_notify` / `consignee_to_notify` are implemented. Latest 2026-06-03 verification: `208 passed`, ruff 0 errors.
 
 本文档承接 PRD 与 MVP 研发任务，用于明确第一版工程架构、数据模型、API、页面和开发顺序。
 
@@ -138,8 +146,9 @@ P0 字段能力：
 | `/reviews/queue` | GET | P1，按状态、批次、关键词和置信等级查看全局待审核候选关系 |
 | `/exports/relationships` | POST | 导出关系明细 Excel/CSV |
 | `/imports/run` | POST | 触发导入、订单角色边生成、候选聚合和已确认关系直导，返回 `run_id`、统计信息、`curated_relationship_count` 和 `archived_files` |
-| `/paths?from=&to=` | GET | P1，返回两个企业之间的关系路径 |
+| `/paths?from_entity_id=&to_entity_id=` | GET | P1，返回两个企业之间的关系路径，支持 `max_depth`、`max_paths` 和 `include_rejected` |
 | `/imports` | GET | P1，查看导入批次 |
+| `/analytics/opportunities` | GET | P2，返回关系群组、桥接主体、客户机会清单和高潜关系候选，支持 `limit`、`min_score` 和 `include_rejected` |
 
 ### Ego Graph 返回结构
 
@@ -194,6 +203,7 @@ MVP 使用 Streamlit 快速实现，后续可迁移 React + AntV G6/Cytoscape.js
 | 全局待审核队列 | 跨企业展示候选、历史匹配、历史冲突和待验证关系，支持按批次、关键词、状态和置信等级筛选；审核成功后自动刷新队列 |
 | 人工审核表单 | 确认、否定、修改关系类型、补充证据，提交时强制填写理由和操作人 |
 | 人工新增关系表单 | 选择两个企业并新增 `manual_only` 或 `verified` 关系 |
+| 机会发现 | 展示 M11 关系群组、桥接主体、客户机会和高潜关系候选 |
 | 导出按钮 | 导出当前中心企业关系明细，可选是否包含订单证据和人工决策 |
 
 ## 6. 图查询策略
@@ -208,7 +218,7 @@ MVP 不加载全图做复杂实时分析，优先局部查询：
 
 ## 7. 测试策略
 
-P0 测试优先覆盖闭环风险：
+测试优先覆盖闭环风险：
 
 - 数据库初始化：核心表和索引存在；
 - 企业导入：样例企业生成主体和别名；
@@ -219,6 +229,9 @@ P0 测试优先覆盖闭环风险：
 - 图查询：中心企业一跳图返回正确节点和边；
 - 审核写回：确认和否定都写入最终关系与决策记录；
 - 导出：中心企业关系明细可生成 CSV/Excel。
+- 导入质量：真实数据试运行保留有效行，字段缺失、非法数值和未知企业等异常可查询、可导出；
+- 路径查询：二跳展开和两企业路径查询支持深度、路径数、节点上限和 `include_rejected` 控制；
+- 机会发现：M11 分析返回关系群组、桥接主体、客户机会和高潜关系候选，并验证 `limit`、`min_score` 和空图谱场景。
 
 ## 8. 开发顺序
 
@@ -230,11 +243,14 @@ P0 测试优先覆盖闭环风险：
 6. 完成 M5 图查询服务；
 7. 完成 M6 API；
 8. 完成 M7 Streamlit 页面；
-9. 完成 M8 演示数据、导出和验收。
+9. 完成 M8 演示数据、导出和验收；
+10. 完成 M9 真实数据试运行、导入质量报告和异常闭环；
+11. 完成 M10 二跳图谱、两企业路径查询和 Streamlit 路径查询；
+12. 完成 M11 图谱分析、机会发现 API 和 Streamlit 机会发现页。
 
 ## 9. 当前开发记录
 
-截至 2026-05-28，当前分支已完成 M2-M8 P0 闭环、导入源文件归档、历史关系复用和中文工作台收口：
+截至 2026-06-08，当前分支已完成 M2-M11 P0/P1/P2 闭环、导入源文件归档、历史关系复用、中文工作台收口、真实数据导入质量闭环、二跳图谱/路径查询和机会发现：
 
 - M2：导入企业、订单、已有关系候选和已确认关系，记录 `import_batch` 和 `import_source_file`。
 - M3/M4：生成 P0 订单角色边并聚合关系候选。
@@ -242,6 +258,9 @@ P0 测试优先覆盖闭环风险：
 - M6：提供 FastAPI P0 endpoint，`/imports/run` 返回 `archived_files`，并提供 `/reviews/queue` 全局待审核队列。
 - M7：提供中文 Streamlit 工作台，并在顶部展示基础逻辑与使用方法；表格字段和常见后端错误已面向业务用户中文化；新增待审核队列 tab 支持跨企业集中审核，审核成功后自动刷新队列。
 - M8：提供可重复生成的演示数据包、预置审核脚本和历史人工判断复用能力。
+- M9：提供字段映射、导入异常、批次查询、质量报告和异常 CSV 导出。
+- M10：提供受控二跳展开、两企业路径查询和 Streamlit 路径步骤表。
+- M11：在现有边表上提供图谱分析/机会发现，识别关系群组、桥接主体、客户机会清单和高潜关系候选，并接入 FastAPI 与 Streamlit。
 
 最近一次验证：
 
@@ -250,7 +269,7 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-结果：全量测试 101 passed，ruff 0 errors。
+结果：全量测试 218 passed，ruff 0 errors。
 
 ## 10. 后续演进
 

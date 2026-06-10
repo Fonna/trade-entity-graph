@@ -1,10 +1,18 @@
 # MVP 研发任务清单
+## 2026-06-08 M11 Implementation Update
+
+- `M11` is implemented as graph analytics and opportunity discovery.
+- `GET /analytics/opportunities` returns relationship clusters, bridge entities, customer opportunity lists, and high-potential relationship candidates.
+- Streamlit adds a `机会发现` tab with M11 metrics and opportunity tables.
+- M11 reuses existing relationship tables and NetworkX; no new database tables are required.
+- Latest verification: `218 passed`, ruff 0 errors.
+
 ## 2026-06-03 Implementation Update
 
 - `CUR-05` is implemented as structured supplemental evidence with type, title, URL, source, summary, date, confidence, and creator fields.
 - `relationship_external_evidence` is wired through the service layer, FastAPI, and Streamlit.
 - P1 auxiliary order-role edges `EDGE-07` / `EDGE-08` are implemented as `shipper_to_notify` and `consignee_to_notify`.
-- Latest verification: `208 passed`, ruff 0 errors.
+- Latest 2026-06-03 verification: `208 passed`, ruff 0 errors.
 
 本文档基于 `企业关系图谱系统_PRD.md` 与 `MVP研发任务拆解.md` 整理，用于后续开发排期、Issue 拆分和验收跟踪。
 
@@ -34,6 +42,7 @@ MVP 第一版只承诺 P0 闭环：
 | M8 | 验收与演示数据 | 准备样例数据、导出结果、测试清单和演示流程 | P0 | PRD 功能验收与业务验收 P0 项通过 |
 | M9 | 真实数据试运行与导入质量闭环 | 支持真实文件字段映射、行级异常沉淀、批次查询、质量报告和异常导出 | P1 | 真实脏数据可部分导入，异常可追溯、可查询、可导出 |
 | M10 | 二跳图谱与两企业路径查询 | 支持受控二跳展开、`GET /paths` 和 Streamlit 路径查询工作流 | P1 | 可限制深度/节点/路径数，返回可解释路径并保留默认隐藏 rejected 行为 |
+| M11 | 图谱分析与机会发现 | 识别关系群组、桥接主体、客户机会和高潜关系候选 | P2 | API 和 Streamlit 可返回机会分、推荐理由和可审核/可销售跟进的机会清单 |
 
 ## 3. 数据库任务
 
@@ -121,6 +130,7 @@ MVP 第一版只承诺 P0 闭环：
 | API-12 | `/paths?from_entity_id=&to_entity_id=` | GET | P1 | 返回 A 到 C 的关系路径，支持 `max_depth`、`max_paths` 和 `include_rejected` |
 | API-13 | `/imports` | GET | P1 | 查看导入批次 |
 | API-14 | `/reviews/queue` | GET | P1 | 按状态、批次、关键词和置信等级查看全局待审核候选关系 |
+| API-15 | `/analytics/opportunities` | GET | P2 | 返回关系群组、桥接主体、客户机会清单和高潜关系候选，支持 `limit`、`min_score` 和 `include_rejected` |
 
 ## 9. 前端页面任务
 
@@ -139,6 +149,7 @@ MVP 第一版只承诺 P0 闭环：
 | UI-11 | 二跳展开 | P1 | 图谱页可设置 `Graph depth` / `Max nodes`，节点过多时按上限截断 |
 | UI-12 | 路径查询 | P1 | 可输入两个企业 ID，返回路径步骤表并提示未知主体或无路径 |
 | UI-13 | 全局待审核队列 | P1 | 可跨企业查看、筛选并带入人工审核候选关系；审核成功后自动刷新队列 |
+| UI-14 | 机会发现 | P2 | 可查看 M11 指标、关系群组、桥接主体、客户机会和高潜关系候选 |
 
 ## 10. 第一版验收清单
 
@@ -155,10 +166,11 @@ MVP 第一版只承诺 P0 闭环：
 - [x] 用户可以导出中心企业关系明细。
 - [x] 用户可以在图谱页展开二跳关系并限制最大节点数；
 - [x] 用户可以查询两个企业之间的连接路径，并查看路径步骤、边来源、状态和证据。
+- [x] 用户可以查看图谱分析/机会发现页，并看到关系群组、桥接主体、客户机会和高潜关系候选。
 
 ## 11. 当前实现状态
 
-截至 2026-06-01，仓库已完成 M2-M10 P0/P1 的服务层优先实现、历史关系复用、演示验收数据包、真实数据试运行导入质量闭环，以及二跳图谱与两企业路径查询：
+截至 2026-06-08，仓库已完成 M2-M11 P0/P1/P2 的服务层优先实现、历史关系复用、演示验收数据包、真实数据试运行导入质量闭环、二跳图谱与两企业路径查询，以及图谱分析/机会发现：
 
 - M2：支持 Excel/CSV 导入，生成 `import_batch`、`import_source_file`、`entity`、`entity_alias`、`order_evidence`，并可导入已有 `relationship_claim`；导入时会复制原始文件到 `data/raw/imports/<run_id>/`。
 - M3: Generates four P0 role edges (`customer_to_shipper`, `customer_to_consignee`, `customer_to_notify`, `shipper_to_consignee`) plus two P1 auxiliary edges (`shipper_to_notify`, `consignee_to_notify`).
@@ -169,6 +181,7 @@ MVP 第一版只承诺 P0 闭环：
 - M8：新增可重复生成的演示数据包和预置审核脚本；演示数据约 50 个主体、80+ 条订单，保留待审核候选关系，并覆盖主要最终关系类型；支持历史人工判断复用、沿用历史、替代历史和标记待验证。
 - M9：支持默认字段映射配置、导入行级异常记录、导入批次查询、质量报告和异常 CSV 导出，真实数据试运行时可保留有效行并沉淀坏行原因。
 - M10：支持 `GET /entities/{entity_id}/ego-graph?depth=2&max_nodes=...` 二跳展开、`GET /paths` 两企业路径查询，以及 Streamlit 图谱页中的深度/节点控制和路径步骤表。
+- M11：支持 `GET /analytics/opportunities` 图谱分析，返回关系群组、桥接主体、客户机会清单和高潜关系候选；Streamlit 新增 `机会发现` tab 展示指标和机会表。
 
 验证命令：
 
@@ -177,4 +190,4 @@ uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-当前通过标准：全量测试 190 passed，ruff 0 errors。
+当前通过标准：全量测试 218 passed，ruff 0 errors。

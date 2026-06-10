@@ -24,6 +24,7 @@ from trade_entity_graph.services.import_quality_service import (
     list_import_batches,
     list_import_errors,
 )
+from trade_entity_graph.services.opportunity_service import analyze_graph_opportunities
 from trade_entity_graph.services.relationship_service import (
     aggregate_relationship_claims,
     generate_order_role_edges,
@@ -43,7 +44,16 @@ from trade_entity_graph.services.review_service import (
     supersede_history_with_claim,
 )
 
-TAB_LABELS = ["数据导入", "企业搜索", "关系图谱", "关系详情", "待审核队列", "人工审核", "导出"]
+TAB_LABELS = [
+    "数据导入",
+    "企业搜索",
+    "关系图谱",
+    "关系详情",
+    "待审核队列",
+    "人工审核",
+    "机会发现",
+    "导出",
+]
 
 SELECTED_CLAIM_STATE_KEY = "selected_claim_id"
 REVIEW_CLAIM_WIDGET_KEY = "review_claim_id"
@@ -165,6 +175,30 @@ TABLE_COLUMN_LABELS: dict[str, str] = {
     "error_type": "异常类型",
     "severity": "严重级别",
     "message": "异常说明",
+    "cluster_id": "关系群组ID",
+    "entity_count": "主体数",
+    "candidate_edge_count": "待审核候选数",
+    "curated_edge_count": "最终关系数",
+    "order_edge_count": "订单证据边数",
+    "verified_relationship_count": "已确认关系数",
+    "country_count": "国家/地区数",
+    "countries": "国家/地区",
+    "top_entities": "核心主体",
+    "opportunity_score": "机会分",
+    "opportunity_type": "机会类型",
+    "direct_neighbor_count": "一跳主体数",
+    "second_hop_entity_count": "二跳主体数",
+    "overseas_node_count": "海外节点数",
+    "overseas_countries": "海外国家/地区",
+    "degree": "连接度",
+    "betweenness": "桥接中心性",
+    "is_articulation_point": "是否关键桥接点",
+    "neighbor_country_count": "相邻国家/地区数",
+    "neighbor_countries": "相邻国家/地区",
+    "from_country": "起点国家/地区",
+    "to_country": "终点国家/地区",
+    "from_entity_type": "起点主体类型",
+    "to_entity_type": "终点主体类型",
 }
 DISPLAY_VALUE_LABELS: dict[str, dict[str, str]] = {
     "entity_type": {
@@ -176,6 +210,8 @@ DISPLAY_VALUE_LABELS: dict[str, dict[str, str]] = {
         "notify": "通知人",
         "buyer": "买方",
         "factory": "工厂",
+        "sales_center": "销售中心",
+        "logistics_service": "物流服务商",
     },
     "status": {
         "active": "有效",
@@ -291,10 +327,21 @@ INTRO_SECTIONS: list[IntroSection] = [
         ],
     },
     {
+        "title": "关系群组与机会发现",
+        "items": [
+            "关系群组是图谱里的连通网络：企业只要通过订单证据、候选关系或最终关系直接/间接连在一起，就会被归入同一群组。",
+            "关系群组不是工商意义上的集团，也不代表系统自动判定同集团；它只说明这些主体在当前关系网络中连成一片。",
+            "机会发现会基于关系群组、桥接主体、二跳客户网络、待审核候选、"
+            "已确认关系、国家/地区和 TEU 等信号生成机会分。",
+            "核心主体是群组内连接度较高的企业，可优先用于人工审核、补充证据或销售机会分析。",
+        ],
+    },
+    {
         "title": "推荐操作流程",
         "items": [
             "先在数据导入页导入企业和订单文件，再搜索企业确认主体与别名。",
             "随后查看一跳关系图谱和关系证据，必要时在人工审核页确认、否定或补充关系。",
+            "再到机会发现页查看关系群组、桥接主体、客户机会和高潜关系候选，用于决定优先审核或销售跟进对象。",
             "审核完成后，可以在导出页导出中心企业的关系明细。",
         ],
     },
@@ -411,9 +458,38 @@ def format_relation_type_option(relation_type: str) -> str:
     return f"{relation_type}（{description}）" if description else relation_type
 
 
+def format_top_entities(value: Any) -> str:
+    """Return readable labels for M11 cluster core entities."""
+
+    if not isinstance(value, list):
+        return str(value) if value not in (None, "") else "-"
+
+    labels = []
+    for item in value:
+        if not isinstance(item, dict):
+            labels.append(str(item))
+            continue
+        name = item.get("canonical_name") or item.get("label") or item.get("entity_id") or "-"
+        meta = []
+        entity_id = item.get("entity_id")
+        if entity_id and entity_id != name:
+            meta.append(str(entity_id))
+        entity_type = item.get("entity_type")
+        if entity_type:
+            meta.append(str(_format_display_value("entity_type", entity_type)))
+        degree = item.get("degree")
+        if degree not in (None, ""):
+            meta.append(f"连接度 {degree}")
+        labels.append(f"{name}（{'，'.join(meta)}）" if meta else str(name))
+
+    return "; ".join(labels) if labels else "-"
+
+
 def _format_display_value(column: str, value: Any) -> Any:
     if value is None or value == "":
         return "-"
+    if column == "top_entities":
+        return format_top_entities(value)
     if column in {"relation_type", "candidate_relation_type"}:
         text = str(value)
         if text.endswith("_candidate"):
@@ -1524,6 +1600,64 @@ def render_review_tab() -> None:
             st.json(result)
 
 
+def render_opportunity_tab() -> None:
+    """Render M11 graph analytics and opportunity discovery."""
+
+    st.subheader("M11 图谱分析 / 机会发现")
+    include_rejected = st.checkbox("分析时包含已否定的人工关系")
+    limit = int(st.number_input("每类机会展示数量", min_value=1, max_value=100, value=20, step=5))
+    min_score = float(
+        st.number_input("最小机会分", min_value=0.0, max_value=1.0, value=0.0, step=0.05)
+    )
+
+    try:
+        result = analyze_graph_opportunities(
+            include_rejected=include_rejected,
+            limit=limit,
+            min_score=min_score,
+        )
+    except Exception as exc:
+        st.error(format_error_message(exc))
+        return
+
+    summary = result.get("summary") or {}
+    metric_cols = st.columns(6)
+    metric_cols[0].metric("主体数", summary.get("entity_count", 0))
+    metric_cols[1].metric("边数", summary.get("edge_count", 0))
+    metric_cols[2].metric("关系群组", summary.get("cluster_count", 0))
+    metric_cols[3].metric("桥接主体", summary.get("bridge_entity_count", 0))
+    metric_cols[4].metric("客户机会", summary.get("customer_opportunity_count", 0))
+    metric_cols[5].metric("高潜关系", summary.get("relationship_opportunity_count", 0))
+
+    st.markdown("**高潜关系机会**")
+    relationship_rows = result.get("relationship_opportunities") or []
+    if relationship_rows:
+        show_table(relationship_rows)
+    else:
+        st.info("暂无达到当前分数阈值的高潜关系候选。")
+
+    st.markdown("**桥接主体**")
+    bridge_rows = result.get("bridge_entities") or []
+    if bridge_rows:
+        show_table(bridge_rows)
+    else:
+        st.info("暂无明显桥接主体。")
+
+    st.markdown("**客户机会清单**")
+    customer_rows = result.get("customer_opportunities") or []
+    if customer_rows:
+        show_table(customer_rows)
+    else:
+        st.info("暂无客户机会。")
+
+    with st.expander("关系群组明细"):
+        cluster_rows = result.get("clusters") or []
+        if cluster_rows:
+            show_table(cluster_rows)
+        else:
+            st.info("暂无关系群组。")
+
+
 def render_export_tab() -> None:
     """Render export preview."""
 
@@ -1559,6 +1693,8 @@ def main() -> None:
     with tabs[5]:
         render_review_tab()
     with tabs[6]:
+        render_opportunity_tab()
+    with tabs[7]:
         render_export_tab()
 
 

@@ -1,11 +1,19 @@
 # Trade Entity Graph
+## 2026-06-08 M11 Status Update
+
+- Added M11 graph analytics and opportunity discovery: relationship clusters, bridge entities, customer opportunity lists, and high-potential relationship candidates.
+- FastAPI provides `GET /analytics/opportunities` with `limit`, `min_score`, and `include_rejected` controls.
+- Streamlit adds a new `机会发现` opportunity-discovery tab.
+- M11 reuses existing edge tables and NetworkX; no new database tables are required.
+- Latest verification: `uv --cache-dir .uv-cache run pytest` returned `218 passed`, and `uv --cache-dir .uv-cache run ruff check .` returned `All checks passed!`.
+
 ## 2026-06-03 Status Update
 
 - Added structured supplemental evidence: `relationship_external_evidence` can link to either a relationship candidate or a curated relationship and stores evidence type, title, URL, source, summary, date, confidence level, and creator.
 - FastAPI now provides `POST /relationships/{relationship_id}/external-evidence`; review and manual relationship requests can include `external_evidence`.
 - Streamlit relationship details now separate order evidence and supplemental evidence; the review page accepts optional supplemental evidence.
 - P1 auxiliary order-role edges are now implemented: in addition to the four P0 order-role edge types, the importer now generates `shipper_to_notify` and `consignee_to_notify`.
-- Latest verification: `uv --cache-dir .uv-cache run pytest` returned `208 passed`, and `uv --cache-dir .uv-cache run ruff check .` returned `All checks passed!`.
+- Latest 2026-06-03 verification: `uv --cache-dir .uv-cache run pytest` returned `208 passed`, and `uv --cache-dir .uv-cache run ruff check .` returned `All checks passed!`.
 
 
 English | [中文](README.md)
@@ -76,7 +84,7 @@ trade-entity-graph/
 
 ## Quick Start
 
-The repository has completed the M0/M1 baseline and now includes the M2-M10 P0/P1 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop/two-hop graph query, two-entity path query, FastAPI endpoints, Chinese Streamlit workbench, export support, demo acceptance data, and the M9 real-data import QA loop with configurable field mapping, row-level import errors, import batch queries, quality reports, and import-error CSV export. M10 adds bounded two-hop expansion, `GET /paths`, and a Streamlit path-query workflow. On 2026-06-03, structured supplemental evidence was added for relationship candidates and curated relationships. P1 auxiliary order-role edges (`shipper_to_notify`, `consignee_to_notify`) are now implemented.
+The repository has completed the M0/M1 baseline and now includes the M2-M11 P0/P1/P2 demo loop: Excel/CSV import, source-file archiving, order-role edge generation, relationship candidate aggregation, one-hop/two-hop graph query, two-entity path query, FastAPI endpoints, Chinese Streamlit workbench, export support, demo acceptance data, the M9 real-data import QA loop, and M11 graph analytics/opportunity discovery. M10 adds bounded two-hop expansion, `GET /paths`, and a Streamlit path-query workflow. M11 adds `GET /analytics/opportunities` and a Streamlit `机会发现` tab. On 2026-06-03, structured supplemental evidence was added for relationship candidates and curated relationships. P1 auxiliary order-role edges (`shipper_to_notify`, `consignee_to_notify`) are now implemented.
 
 All Python environments, dependency installation, and Python commands in this project should use `uv` to avoid polluting the global Python environment.
 
@@ -125,6 +133,12 @@ Import batches and quality results are available through `GET /imports`, `GET /i
 M10 expands graph exploration while keeping it bounded: `GET /entities/{entity_id}/ego-graph?depth=2&max_nodes=50` preserves the default one-hop behavior, can expand to depth two, and limits returned nodes with `max_nodes`. Rejected relationships remain hidden by default and can be included with `include_rejected=true`.
 
 Two-entity path query is available through `GET /paths?from_entity_id=<A>&to_entity_id=<C>&max_depth=3&max_paths=5`. The response includes explainable paths, path nodes, edge provenance, statuses, and scores. In Streamlit, the graph tab now has `Graph depth` / `Max nodes` controls and a two-entity path-query section that renders `step/from_name/to_name/relation_type/record_type/status/evidence`; unknown entities and no-path results show visible prompts.
+
+### M11 Graph Analytics and Opportunity Discovery
+
+M11 expands the system from relationship lookup to opportunity discovery. `GET /analytics/opportunities?limit=20&min_score=0&include_rejected=false` returns relationship clusters, bridge entities, customer opportunity lists, and high-potential relationship candidates. The service reuses `order_role_edge`, `relationship_claim`, and `curated_relationship`; NetworkX computes connected clusters, bridge centrality, two-hop customer networks, and opportunity scores without adding database tables.
+
+The Streamlit workbench now includes a `机会发现` tab with M11 metrics and opportunity tables that can feed review prioritization or sales analysis.
 
 ## Data Flow
 
@@ -176,14 +190,14 @@ flowchart TD
 
 ## Current Development Status
 
-As of 2026-06-03, the current branch includes the M2-M10 P0/P1 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, demo acceptance data, the M9 real-data import QA loop, the M10 two-hop graph and two-entity path-query workflow, and structured supplemental evidence. Latest verification:
+As of 2026-06-08, the current branch includes the M2-M11 P0/P1/P2 loop, source-file archiving, historical relationship reuse, the global review queue, the Chinese Streamlit workbench, demo acceptance data, the M9 real-data import QA loop, the M10 two-hop graph and two-entity path-query workflow, structured supplemental evidence, and M11 graph analytics/opportunity discovery. Latest verification:
 
 ```powershell
 uv --cache-dir .uv-cache run pytest
 uv --cache-dir .uv-cache run ruff check .
 ```
 
-Result: `208 passed`, ruff `All checks passed!`.
+Result: `218 passed`, ruff `All checks passed!`.
 
 ## Recommended Development Order
 
@@ -198,7 +212,8 @@ Result: `208 passed`, ruff `All checks passed!`.
 9. M8: Review persistence, audit logs, acceptance demo.
 10. M9: Real-data dry runs, import quality reports, and import-error workflow.
 11. M10: Two-hop graph expansion, `GET /paths` two-entity path query, and Streamlit path-query workflow.
-12. Structured supplemental evidence: attach public information, sales feedback, business documents, and manual notes to candidates or curated relationships; P1 auxiliary order-role edges are now implemented.
+12. M11: Relationship clusters, bridge entities, customer opportunity lists, and high-potential relationship candidates.
+13. Structured supplemental evidence: attach public information, sales feedback, business documents, and manual notes to candidates or curated relationships; P1 auxiliary order-role edges are now implemented.
 
 ## Remote Repository
 
